@@ -9,7 +9,7 @@ import data
 import camera
 
 class Window:
-	def __init__(self, settings: dict, data: data.Voxels):
+	def __init__(self, data: data.Voxels, **settings):
 		# Store relevant settings
 		self.width = int(settings["width"] or 120)
 		self.height = int(settings["height"] or 60)
@@ -20,8 +20,7 @@ class Window:
 
 		# Setup the camera and thread pool that will be used to update this window
 		self.pool = mp.Pool(processes = self.threads)
-		self.cam = camera.Camera(settings, data)
-		
+		self.cam = camera.Camera(data, **settings)
 
 		# Configure TK and elements
 		self.root = tk.Tk()
@@ -37,18 +36,19 @@ class Window:
 		self.canvas.pack()
 
 		# Configure the pixel elements on the canvas at their default black color, use a pixel cache to remember pixel colors by index
+		# Index represents 2D positions, the range is ordered to represent all pixels read from left-to-right and up-to-down
 		self.pixels = []
-		self.canvas_pixels = {}
-		for x in range(0, self.width):
-			for y in range(0, self.height):
-				pos = vec2(x, y)
-				pos_min = vec2(pos.x * self.scale, pos.y * self.scale)
-				pos_max = vec2(pos_min.x + self.scale, pos_min.y + self.scale)
-				self.canvas_pixels[pos.get_str()] = self.canvas.create_rectangle(pos_min.x, pos_min.y, pos_max.x, pos_max.y, fill = "#000000", width = 0)
-				self.pixels.append("000000")
+		self.canvas_pixels = []
+		for i in range(0, self.width * self.height):
+			pos = line_to_rect(i, self.width)
+			pos_min = vec2(pos.x * self.scale, pos.y * self.scale)
+			pos_max = vec2(pos_min.x + self.scale, pos_min.y + self.scale)
+			canvas_rect = self.canvas.create_rectangle(pos_min.x, pos_min.y, pos_max.x, pos_max.y, fill = "#000000", width = 0)
+			self.canvas_pixels.append(canvas_rect)
+			self.pixels.append("000000")
 
 		# Configure info text
-		self.text_info = self.canvas.create_text(10, 10, font = ("Purisa", self.scale) , anchor = "nw", fill = "#ffffff")
+		self.canvas_info = self.canvas.create_text(10, 10, font = ("Purisa", self.scale) , anchor = "nw", fill = "#ffffff")
 
 		# Start the main loop and update function
 		self.root.after(0, self.update)
@@ -90,7 +90,7 @@ class Window:
 		time_start = t.time()
 
 		# Request the camera to compute new pixels, then update each canvas rectangle element to display the new color data
-		# The 2D position of each pixel is extracted from its index in the array
+		# The 2D position of each pixel is stored as its index and implicitly known here
 		result = self.cam.get(self.width, self.height, self.pool, self.threads)
 		for i, c in enumerate(result):
 			if c:
@@ -99,9 +99,7 @@ class Window:
 					col_old = hex_to_rgb(self.pixels[i])
 					col = col.mix(col_old, self.smooth)
 					c = col.get_hex()
-
-				px = line_to_rect(i, self.width)
-				item = self.canvas_pixels[vec2(px.x, px.y).get_str()]
+				item = self.canvas_pixels[i]
 				self.canvas.itemconfig(item, fill = "#" + c)
 				self.pixels[i] = c
 
@@ -111,45 +109,45 @@ class Window:
 		time_next = round(1000 / self.fps / (1 + time_end - time_start))
 		fps_text = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(time_next) + " / " + str(self.fps) + " FPS"
 		fps_col = time_next >= self.fps + 10 and "#00ff00" or time_next <= self.fps - 10 and "#ff0000" or "#ffff00"
-		self.canvas.itemconfig(self.text_info, text = fps_text)
-		self.canvas.itemconfig(self.text_info, fill = fps_col)
+		self.canvas.itemconfig(self.canvas_info, text = fps_text)
+		self.canvas.itemconfig(self.canvas_info, fill = fps_col)
 		self.root.after(int(time_next), self.update)
 
 # Spawn test environment
-settings = data.Voxels()
-settings.register_material("solid_red", data.material_default, {
-	"albedo": rgb(255, 0, 0),
-	"roughness": 0.1,
-	"translucency": 0,
-	"angle": 180,
-})
-settings.register_material("solid_green", data.material_default, {
-	"albedo": rgb(0, 255, 0),
-	"roughness": 0.1,
-	"translucency": 0,
-	"angle": 180,
-})
-settings.register_material("solid_blue", data.material_default, {
-	"albedo": rgb(0, 0, 255),
-	"roughness": 0.1,
-	"translucency": 0,
-	"angle": 180,
-})
-settings.set_voxel_area(vec3(-8, -8, 8), vec3(8, 8, 8), "solid_red")
-settings.set_voxel_area(vec3(8, -8, -8), vec3(8, 8, 8), "solid_green")
-settings.set_voxel_area(vec3(-8, -8, -8), vec3(8, -8, 8), "solid_blue")
+db = data.Voxels()
+db.register_material("solid_red", data.Material(data.material_default,
+	albedo = rgb(255, 0, 0),
+	roughness = 0.1,
+	translucency = 0,
+	angle = 180,
+))
+db.register_material("solid_green", data.Material(data.material_default,
+	albedo = rgb(0, 255, 0),
+	roughness = 0.1,
+	translucency = 0,
+	angle = 180,
+))
+db.register_material("solid_blue", data.Material(data.material_default,
+	albedo = rgb(0, 0, 255),
+	roughness = 0.1,
+	translucency = 0,
+	angle = 180,
+))
+db.set_voxel_area(vec3(-8, -8, 8), vec3(8, 8, 8), "solid_red")
+db.set_voxel_area(vec3(8, -8, -8), vec3(8, 8, 8), "solid_green")
+db.set_voxel_area(vec3(-8, -8, -8), vec3(8, -8, 8), "solid_blue")
 
-Window({
-	"width": 120,
-	"height": 60,
-	"scale": 8,
-	"fps": 30,
-	"smooth": 0.25,
-	"skip": 0.25,
-	"fov": 90,
-	"dof": 1,
-	"hits": 2,
-	"dist_min": 2,
-	"dist_max": 16,
-	"threads": 4,
-}, settings)
+Window(db,
+	width = 120,
+	height = 60,
+	scale = 8,
+	fps = 30,
+	smooth = 0.25,
+	skip = 0.25,
+	fov = 90,
+	dof = 1,
+	hits = 2,
+	dist_min = 2,
+	dist_max = 16,
+	threads = 4,
+)

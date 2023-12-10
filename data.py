@@ -3,55 +3,48 @@ from lib import *
 
 import random
 
-# Default material function, mods may provide their own to replace this
-def material_default(pos, vel, col, step, hits, data):
+# Default material function, mods can provide materials that use their own functions if desired
+def material_default(ray, mat):
 	# Translucency: Random chance that each ray will ignore this voxel
-	if data["translucency"] > random.random():
-		return pos, vel, col
+	if mat.translucency > random.random():
+		return
 
 	# Color: Mix the albedo of this voxel into the pixel color, mixing reduces with the number of hits
-	col = col and col.mix(data["albedo"], 1 / hits) or data["albedo"]
+	ray.col = ray.col and ray.col.mix(mat.albedo, 1 / ray.hits) or mat.albedo
 
-	# Velocity: Either bounce the ray or let it pass based on translucency probability
-	vel = vel.mix(vec3(-vel.x, -vel.y, -vel.z), data["angle"] / 360)
-	vel += vec3(rand(data["roughness"]), rand(data["roughness"]), rand(data["roughness"]))
-	vel.normalize()
-
-	return pos, vel, col
+	# Velocity: Bounce the ray based on material angle
+	ray.vel = ray.vel.mix(vec3(-ray.vel.x, -ray.vel.y, -ray.vel.z), mat.angle / 360)
+	ray.vel += vec3(rand(mat.roughness), rand(mat.roughness), rand(mat.roughness))
+	ray.vel.normalize()
 
 class Material:
-	def __init__(self, func: callable, data: dict):
-		# Materials hold a function executed when a ray hits them, as well as data storing the properties used by this function
+	def __init__(self, func: callable, **settings):
 		self.function = func or material_default
-		self.data = data or {
-			"albedo": rgb(255, 255, 255),
-			"roughness": 0.5,
-			"translucency": 0,
-			"angle": 0.5,
-		}
+		for s in settings:
+			setattr(self, s, settings[s])
 
 class Voxels:
 	def __init__(self):
 		self.materials = {}
 		self.voxels = {}
 
-	# Register a new material in the material database
-	def register_material(self, name: str, func: callable, data: dict):
-		self.materials[name] = Material(func, data)
+	# Add a new material to the material database
+	def register_material(self, name: str, mat: Material):
+		self.materials[name] = mat
 
-	#Unregister a from the material database
+	# Remove a material from the material database
 	def unregister_material(self, name: str):
 		if name in self.materials:
 			del self.materials[name]
 
-	#Get the properties of a material
+	# Get a material by its name
 	def get_material(self, name: str):
 		if name in self.materials:
 			return self.materials[name]
 
-	#Get the voxel at this position
+	# Get the voxel at this position
 	def get_voxel(self, pos: vec3):
-		p = pos.get_str()
+		p = pos.string()
 		if p in self.voxels:
 			return self.voxels[p]
 		return None
@@ -73,13 +66,13 @@ class Voxels:
 
 	# Remove a voxel from a single position
 	def clear_voxel(self, pos: vec3):
-		p = pos.get_str()
+		p = pos.string()
 		if pos in self.voxels:
 			del self.voxels[pos]
 
 	# Add a voxel at a single position
 	def set_voxel(self, pos: vec3, mat: str):
-		p = pos.get_str()
+		p = pos.string()
 		self.voxels[p] = mat
 
 	# Remove voxels from a cubic area
