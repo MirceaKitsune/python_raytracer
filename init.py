@@ -15,11 +15,13 @@ class Window:
 		self.height = int(settings["height"] or 60)
 		self.scale = int(settings["scale"] or 4)
 		self.fps = int(settings["fps"] or 30)
+		self.smooth = float(settings["smooth"] or 0)
 		self.threads = int(settings["threads"] or mp.cpu_count())
 
 		# Setup the camera and thread pool that will be used to update this window
 		self.pool = mp.Pool(processes = self.threads)
 		self.cam = camera.Camera(settings, data)
+		
 
 		# Configure TK and elements
 		self.root = tk.Tk()
@@ -34,15 +36,16 @@ class Window:
 		self.canvas = tk.Canvas(self.root, width = self.width * self.scale, height = self.height * self.scale)
 		self.canvas.pack()
 
-		# Configure the pixel elements on the canvas
+		# Configure the pixel elements on the canvas at their default black color, use a pixel cache to remember pixel colors by index
+		self.pixels = []
 		self.canvas_pixels = {}
 		for x in range(0, self.width):
 			for y in range(0, self.height):
 				pos = vec2(x, y)
 				pos_min = vec2(pos.x * self.scale, pos.y * self.scale)
 				pos_max = vec2(pos_min.x + self.scale, pos_min.y + self.scale)
-				col = "#" + rgb(2, 0, 0).get_hex()
-				self.canvas_pixels[pos.get_str()] = self.canvas.create_rectangle(pos_min.x, pos_min.y, pos_max.x, pos_max.y, fill = col, width = 0)
+				self.canvas_pixels[pos.get_str()] = self.canvas.create_rectangle(pos_min.x, pos_min.y, pos_max.x, pos_max.y, fill = "#000000", width = 0)
+				self.pixels.append("000000")
 
 		# Configure info text
 		self.text_info = self.canvas.create_text(10, 10, font = ("Purisa", self.scale) , anchor = "nw", fill = "#ffffff")
@@ -70,14 +73,15 @@ class Window:
 
 		# Rotation keys
 		elif event.keysym.lower() in "up" + "down" + "left" + "right":
+			deg = 90 / 16
 			if event.keysym.lower() == "up" and (self.cam.rot.y < 90 or self.cam.rot.y >= 270):
-				self.cam.rot.rot(vec3(0, +11.25, 0))
+				self.cam.rot = self.cam.rot.rotate(vec3(0, +deg, 0))
 			elif event.keysym.lower() == "down" and (self.cam.rot.y <= 90 or self.cam.rot.y > 270):
-				self.cam.rot.rot(vec3(0, -11.25, 0))
+				self.cam.rot = self.cam.rot.rotate(vec3(0, -deg, 0))
 			elif event.keysym.lower() == "left":
-				self.cam.rot.rot(vec3(0, 0, -11.25))
+				self.cam.rot = self.cam.rot.rotate(vec3(0, 0, -deg))
 			elif event.keysym.lower() == "right":
-				self.cam.rot.rot(vec3(0, 0, +11.25))
+				self.cam.rot = self.cam.rot.rotate(vec3(0, 0, +deg))
 
 	def onMouseMove(self, event):
 		pass
@@ -90,9 +94,16 @@ class Window:
 		result = self.cam.get(self.width, self.height, self.pool, self.threads)
 		for i, c in enumerate(result):
 			if c:
+				if self.smooth > 0:
+					col = hex_to_rgb(c)
+					col_old = hex_to_rgb(self.pixels[i])
+					col = col.mix(col_old, self.smooth)
+					c = col.get_hex()
+
 				px = line_to_rect(i, self.width)
 				item = self.canvas_pixels[vec2(px.x, px.y).get_str()]
 				self.canvas.itemconfig(item, fill = "#" + c)
+				self.pixels[i] = c
 
 		# Measure the time before and after the update to deduce practical FPS
 		# Reschedule the function to aim for the chosen FPS and update the info text
@@ -106,21 +117,38 @@ class Window:
 
 # Spawn test environment
 settings = data.Voxels()
-settings.register_material("solid_red", data.material_default, { "albedo": rgb(255, 0, 0), "roughness": 0.1 })
-settings.register_material("solid_green", data.material_default, { "albedo": rgb(0, 255, 0), "roughness": 0.1 })
-settings.register_material("solid_blue", data.material_default, { "albedo": rgb(0, 0, 255), "roughness": 0.1 })
-settings.set_voxel_area(vec3(-2, -2, 8), vec3(2, 2, 8), "solid_red")
-settings.set_voxel_area(vec3(8, -2, -2), vec3(8, 2, 2), "solid_green")
-settings.set_voxel_area(vec3(-2, -8, -2), vec3(2, -8, 2), "solid_blue")
+settings.register_material("solid_red", data.material_default, {
+	"albedo": rgb(255, 0, 0),
+	"roughness": 0.1,
+	"translucency": 0,
+	"angle": 180,
+})
+settings.register_material("solid_green", data.material_default, {
+	"albedo": rgb(0, 255, 0),
+	"roughness": 0.1,
+	"translucency": 0,
+	"angle": 180,
+})
+settings.register_material("solid_blue", data.material_default, {
+	"albedo": rgb(0, 0, 255),
+	"roughness": 0.1,
+	"translucency": 0,
+	"angle": 180,
+})
+settings.set_voxel_area(vec3(-8, -8, 8), vec3(8, 8, 8), "solid_red")
+settings.set_voxel_area(vec3(8, -8, -8), vec3(8, 8, 8), "solid_green")
+settings.set_voxel_area(vec3(-8, -8, -8), vec3(8, -8, 8), "solid_blue")
+
 Window({
 	"width": 120,
 	"height": 60,
 	"scale": 8,
 	"fps": 30,
-	"samples_min": 0,
-	"samples_max": 4,
+	"smooth": 0.25,
+	"skip": 0.25,
 	"fov": 90,
-	"dof": 0.5,
+	"dof": 1,
+	"hits": 2,
 	"dist_min": 2,
 	"dist_max": 16,
 	"threads": 4,

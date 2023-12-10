@@ -1,11 +1,22 @@
 #!/usr/bin/python3
 from lib import *
 
+import random
+
 # Default material function, mods may provide their own to replace this
-def material_default(pos, vel, col, data):
-	col = col.mix(data["albedo"], 1)
-	vel *= vec3(-1, -1, -1) + vec3(rand(data["roughness"]), rand(data["roughness"]), rand(data["roughness"]))
+def material_default(pos, vel, col, step, hits, data):
+	# Translucency: Random chance that each ray will ignore this voxel
+	if data["translucency"] > random.random():
+		return pos, vel, col
+
+	# Color: Mix the albedo of this voxel into the pixel color, mixing reduces with the number of hits
+	col = col and col.mix(data["albedo"], 1 / hits) or data["albedo"]
+
+	# Velocity: Either bounce the ray or let it pass based on translucency probability
+	vel = vel.mix(vec3(-vel.x, -vel.y, -vel.z), data["angle"] / 360)
+	vel += vec3(rand(data["roughness"]), rand(data["roughness"]), rand(data["roughness"]))
 	vel.normalize()
+
 	return pos, vel, col
 
 class Material:
@@ -14,7 +25,9 @@ class Material:
 		self.function = func or material_default
 		self.data = data or {
 			"albedo": rgb(255, 255, 255),
-			"roughness": 0.5
+			"roughness": 0.5,
+			"translucency": 0,
+			"angle": 0.5,
 		}
 
 class Voxels:

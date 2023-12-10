@@ -17,6 +17,9 @@ class vec2:
 		return vec2(self.x / other.x, self.y / other.y)
 	def get_str(self):
 		return str(self.x) + "," + str(self.y)
+	def mix(self, other, bias1):
+		bias2 = 1 - bias1
+		return vec2(self.x * bias2 + other.x * bias1, self.y * bias2 + other.y * bias1)
 	def normalize(self):
 		ref = max(abs(self.x), abs(self.y))
 		if ref > 0:
@@ -39,10 +42,11 @@ class vec3:
 		return vec3(self.x / other.x, self.y / other.y, self.z / other.z)
 	def get_str(self):
 		return str(self.x) + "," + str(self.y) + "," + str(self.z)
-	def rot(self, other):
-		self.x = (self.x + other.x) % 360
-		self.y = (self.y + other.y) % 360
-		self.z = (self.z + other.z) % 360
+	def mix(self, other, bias1):
+		bias2 = 1 - bias1
+		return vec3(self.x * bias2 + other.x * bias1, self.y * bias2 + other.y * bias1, self.z * bias2 + other.z * bias1)
+	def rotate(self, other):
+		return vec3((self.x + other.x) % 360, (self.y + other.y) % 360, (self.z + other.z) % 360)
 	def dir(self):
 		# Directions X and Z are calculated from rotation Z, direction Y is calculated from rotation Y, rotation X is ignored as roll is currently not supported
 		# X: -1 = Left, +1 = Right, Y: -1 = Down, +1 = Up, Z: -1 = Backward, +1 = Forward
