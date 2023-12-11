@@ -98,6 +98,12 @@ def rand(amp: float):
 		return 0
 	return (-1 + random.random() * 2) * amp
 
+# Normalize: Returns a 0 to 1 range representing the position of x between x_min and x_max
+def normalize(x, x_min, x_max):
+	if x_min >= x_max:
+		return 0
+	return min(1, max(0, (x - x_min) / (x_max - x_min)))
+
 # Convert an integer to a vec2, this allows fetching a 2D vector position from its index in a 1D string
 def line_to_rect(i: int, width: int):
 	return vec2(math.floor(i % width), math.floor(i / width))

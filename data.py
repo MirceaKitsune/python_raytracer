@@ -9,8 +9,9 @@ def material_default(ray, mat):
 	if mat.translucency > random.random():
 		return
 
-	# Color: Mix the albedo of this voxel into the pixel color, mixing reduces with the number of hits
-	ray.col = ray.col and ray.col.mix(mat.albedo, 1 / ray.hits) or mat.albedo
+	# Color: Use material color darkened by alpha value, mixing reduces with the number of hits
+	col = mat.albedo.mix(rgb(0, 0, 0), 1 - ray.alpha)
+	ray.col = ray.col and ray.col.mix(col, 1 / ray.hits) or col
 
 	# Velocity: Bounce the ray based on material angle
 	ray.vel = ray.vel.mix(vec3(-ray.vel.x, -ray.vel.y, -ray.vel.z), mat.angle / 360)

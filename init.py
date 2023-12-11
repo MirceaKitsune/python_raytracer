@@ -15,7 +15,8 @@ class Window:
 		self.height = int(settings["height"] or 60)
 		self.scale = int(settings["scale"] or 4)
 		self.fps = int(settings["fps"] or 30)
-		self.smooth = float(settings["smooth"] or 0)
+		self.color_blur = float(settings["color_blur"] or 0)
+		self.color_burn = float(settings["color_burn"] or 0)
 		self.threads = int(settings["threads"] or mp.cpu_count())
 
 		# Setup the camera and thread pool that will be used to update this window
@@ -91,17 +92,22 @@ class Window:
 
 		# Request the camera to compute new pixels, then update each canvas rectangle element to display the new color data
 		# The 2D position of each pixel is stored as its index and implicitly known here
+		# The color burn effect is used to improve viewport performance by probabilistically skipping redraws of pixels who's color hasn't changes a lot
 		result = self.cam.get(self.width, self.height, self.pool, self.threads)
 		for i, c in enumerate(result):
-			if c:
-				if self.smooth > 0:
-					col = hex_to_rgb(c)
-					col_old = hex_to_rgb(self.pixels[i])
-					col = col.mix(col_old, self.smooth)
-					c = col.get_hex()
-				item = self.canvas_pixels[i]
-				self.canvas.itemconfig(item, fill = "#" + c)
-				self.pixels[i] = c
+			if c and c != self.pixels[i]:
+				col = hex_to_rgb(c)
+				col_old = hex_to_rgb(self.pixels[i])
+				diff_r = abs((col.r - col_old.r) / 255)
+				diff_g = abs((col.g - col_old.g) / 255)
+				diff_b = abs((col.b - col_old.b) / 255)
+				diff = (diff_r + diff_g + diff_b) / 3
+				if diff > random.random() * self.color_burn:
+					col = col.mix(col_old, self.color_blur)
+					col_hex = col.get_hex()
+					item = self.canvas_pixels[i]
+					self.canvas.itemconfig(item, fill = "#" + col_hex)
+					self.pixels[i] = col_hex
 
 		# Measure the time before and after the update to deduce practical FPS
 		# Reschedule the function to aim for the chosen FPS and update the info text
@@ -142,12 +148,14 @@ Window(db,
 	height = 60,
 	scale = 8,
 	fps = 30,
-	smooth = 0.25,
-	skip = 0.25,
 	fov = 90,
 	dof = 1,
-	hits = 2,
+	fog = 0.5,
+	color_blur = 0.25,
+	color_burn = 0.1,
 	dist_min = 2,
-	dist_max = 16,
+	dist_max = 24,
+	terminate_hits = 2,
+	terminate_random = 0.1,
 	threads = 4,
 )
