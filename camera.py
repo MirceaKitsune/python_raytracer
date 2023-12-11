@@ -55,18 +55,27 @@ class Camera:
 			step = 0,
 			life = self.dist_max - self.dist_min,
 			hits = 0,
+			neighbors = [],
 		)
 
 		# Each step the ray advances through space by adding its velocity to its position, starting from the minimum distance and going up to the maximum distance
 		# As voxels exist at integer numbers, the float position is rounded to check if a voxel is located at this spot
 		# If a material is found, its function is called which can modify any of the ray properties provided
+		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
 		while ray.step < ray.life:
 			ray.step += 1
 			ray.pos += ray.vel
-			vox = self.data.get_voxel(ray.pos.round())
-			if vox:
+			mat = self.data.get_voxel(ray.pos.round())
+			if mat:
 				ray.hits += 1
-				mat = self.data.get_material(vox)
+				ray.neighbors = [
+					self.data.get_voxel(ray.pos.round() + vec3(-1, 0, 0)),
+					self.data.get_voxel(ray.pos.round() + vec3(+1, 0, 0)),
+					self.data.get_voxel(ray.pos.round() + vec3(0, -1, 0)),
+					self.data.get_voxel(ray.pos.round() + vec3(0, +1, 0)),
+					self.data.get_voxel(ray.pos.round() + vec3(0, 0, -1)),
+					self.data.get_voxel(ray.pos.round() + vec3(0, 0, +1)),
+				]
 				mat.function(ray, mat)
 			if self.fog and ray.step / ray.life > self.fog:
 				ray.alpha *= 1 - (ray.step / ray.life) * self.fog

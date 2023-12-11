@@ -120,28 +120,26 @@ class Window:
 		self.root.after(int(time_next), self.update)
 
 # Spawn test environment
-db = data.Voxels()
-db.register_material("solid_red", data.Material(data.material_default,
+mat_red = data.Material(data.material_default,
 	albedo = rgb(255, 0, 0),
 	roughness = 0.1,
 	translucency = 0,
-	angle = 180,
-))
-db.register_material("solid_green", data.Material(data.material_default,
+)
+mat_green = data.Material(data.material_default,
 	albedo = rgb(0, 255, 0),
 	roughness = 0.1,
 	translucency = 0,
-	angle = 180,
-))
-db.register_material("solid_blue", data.Material(data.material_default,
+)
+mat_blue = data.Material(data.material_default,
 	albedo = rgb(0, 0, 255),
 	roughness = 0.1,
 	translucency = 0,
-	angle = 180,
-))
-db.set_voxel_area(vec3(-8, -8, 8), vec3(8, 8, 8), "solid_red")
-db.set_voxel_area(vec3(8, -8, -8), vec3(8, 8, 8), "solid_green")
-db.set_voxel_area(vec3(-8, -8, -8), vec3(8, -8, 8), "solid_blue")
+)
+
+db = data.Voxels()
+db.set_voxel_area(vec3(-8, -8, 8), vec3(8, 8, 8), mat_red)
+db.set_voxel_area(vec3(8, -8, -8), vec3(8, 8, 8), mat_green)
+db.set_voxel_area(vec3(-8, -8, -8), vec3(8, -8, 8), mat_blue)
 
 Window(db,
 	width = 120,

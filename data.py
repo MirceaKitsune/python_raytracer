@@ -5,16 +5,25 @@ import random
 
 # Default material function, mods can provide materials that use their own functions if desired
 def material_default(ray, mat):
-	# Translucency: Random chance that each ray will ignore this voxel
-	if mat.translucency > random.random():
-		return
-
 	# Color: Use material color darkened by alpha value, mixing reduces with the number of hits
 	col = mat.albedo.mix(rgb(0, 0, 0), 1 - ray.alpha)
 	ray.col = ray.col and ray.col.mix(col, 1 / ray.hits) or col
 
-	# Velocity: Bounce the ray based on material angle
-	ray.vel = ray.vel.mix(vec3(-ray.vel.x, -ray.vel.y, -ray.vel.z), mat.angle / 360)
+	# Velocity: Estimate the normal direction of the voxel based on its neighbors, bounce the ray back for solid bounces but not translucent ones
+	# Reflections may occur in one or all three axis, diagonal face normals are not supported but corner voxels may act as a 45* mirror
+	if mat.translucency < random.random():
+		if ray.vel.x > 0 and (not ray.neighbors[0] or ray.neighbors[0].translucency > random.random()):
+			ray.vel.x *= -1
+		elif ray.vel.x < 0 and (not ray.neighbors[1] or ray.neighbors[1].translucency > random.random()):
+			ray.vel.x *= -1
+		if ray.vel.y > 0 and (not ray.neighbors[2] or ray.neighbors[2].translucency > random.random()):
+			ray.vel.y *= -1
+		elif ray.vel.y < 0 and (not ray.neighbors[3] or ray.neighbors[3].translucency > random.random()):
+			ray.vel.y *= -1
+		if ray.vel.z > 0 and (not ray.neighbors[4] or ray.neighbors[4].translucency > random.random()):
+			ray.vel.z *= -1
+		elif ray.vel.z < 0 and (not ray.neighbors[5] or ray.neighbors[5].translucency > random.random()):
+			ray.vel.z *= -1
 	ray.vel += vec3(rand(mat.roughness), rand(mat.roughness), rand(mat.roughness))
 	ray.vel.normalize()
 
@@ -26,29 +35,12 @@ class Material:
 
 class Voxels:
 	def __init__(self):
-		self.materials = {}
 		self.voxels = {}
-
-	# Add a new material to the material database
-	def register_material(self, name: str, mat: Material):
-		self.materials[name] = mat
-
-	# Remove a material from the material database
-	def unregister_material(self, name: str):
-		if name in self.materials:
-			del self.materials[name]
-
-	# Get a material by its name
-	def get_material(self, name: str):
-		if name in self.materials:
-			return self.materials[name]
 
 	# Get the voxel at this position
 	def get_voxel(self, pos: vec3):
 		p = pos.string()
-		if p in self.voxels:
-			return self.voxels[p]
-		return None
+		return p in self.voxels and self.voxels[p] or None
 
 	# Move a voxel in the specified direction, will either swap or erase a voxel present at the new position
 	def swap_voxels(self, pos: vec3, vec: vec3, swap: bool):
@@ -72,7 +64,7 @@ class Voxels:
 			del self.voxels[pos]
 
 	# Add a voxel at a single position
-	def set_voxel(self, pos: vec3, mat: str):
+	def set_voxel(self, pos: vec3, mat: Material):
 		p = pos.string()
 		self.voxels[p] = mat
 
@@ -85,7 +77,7 @@ class Voxels:
 					self.clear_voxel(pos)
 
 	# Add voxels in a cubic area
-	def set_voxel_area(self, pos_min: vec3, pos_max, mat: vec3):
+	def set_voxel_area(self, pos_min: vec3, pos_max: vec3, mat: Material):
 		for x in range(int(pos_min.x), int(pos_max.x + 1)):
 			for y in range(int(pos_min.y), int(pos_max.y + 1)):
 				for z in range(int(pos_min.z), int(pos_max.z + 1)):

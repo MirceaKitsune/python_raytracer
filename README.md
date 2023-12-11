@@ -31,8 +31,7 @@ A material is registered using the register_material call of the Voxels class wi
 
   - albedo: The color of this material in hex format, eg: `#ff7f00`.
   - roughness: This amount of random roughness is added to the ray velocity when reflected or refracted.
-  - translucency: Random chance that a ray will pass through this voxel without being affected, probabilistically simulates transparency.
-  - angle: Surface reflection angle in degrees. Voxels are points in space and don't have normals or a face direction so nothing defines which way a ray should bounce back: This is a simplified solution for simulating reflection angles and IOR. If 0 the ray's velocity will not be modified, if 360 the ray is fully inverted and sent back toward the camera... for the most realistic result use 180.
+  - translucency: Chance that a ray will pass through this voxel instead of being bounced back, probabilistically simulates transparency. Can be used to create volumetric fog, this is very costly and should only be done in small areas.
 
 ## Material programming
 
@@ -47,3 +46,4 @@ A material function takes two parameters: The ray properties and the material we
   - step: The number of steps this ray has preformed. 1 is a ray that was just spawned at the camera's minimum draw distance, if `step` equals `life - 1` this is the last move the ray will preform. Can be modified to shorten or prolong the life of a ray.
   - life: The maximum number of steps this ray can preform before the resulting color is drawn. Starts at `dist_max - dist_min`, like `step` it can be modified to make ray life and draw distance shorter or longer.
   - hits: Number of times this voxel has bounced, limited by the `hits` camera setting. Current hit is accounted for so this always starts at 1. Keep in mind that hitting a translucent material may or may not increase this by random chance.
+  - neighbors: A list of 6 entries containing the materials of direct neighbors of this voxel in the order: -x, +x, -y, +y, -z, +z. Primarily used to estimate face direction for ray reflection or refraction. Readonly, this is overwritten by the raytracer each hit.
