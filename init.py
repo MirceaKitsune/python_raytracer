@@ -9,7 +9,7 @@ import data
 import camera
 
 class Window:
-	def __init__(self, data: data.Voxels, **settings):
+	def __init__(self, objects: list, **settings):
 		# Store relevant settings
 		self.width = int(settings["width"] or 120)
 		self.height = int(settings["height"] or 60)
@@ -21,7 +21,7 @@ class Window:
 
 		# Setup the camera and thread pool that will be used to update this window
 		self.pool = mp.Pool(processes = self.threads)
-		self.cam = camera.Camera(data, **settings)
+		self.cam = camera.Camera(objects, **settings)
 
 		# Configure TK and elements
 		self.root = tk.Tk()
@@ -41,7 +41,7 @@ class Window:
 		self.pixels = []
 		self.canvas_pixels = []
 		for i in range(0, self.width * self.height):
-			pos = line_to_rect(i, self.width)
+			pos = index_vec2(i, self.width)
 			pos_min = vec2(pos.x * self.scale, pos.y * self.scale)
 			pos_max = vec2(pos_min.x + self.scale, pos_min.y + self.scale)
 			canvas_rect = self.canvas.create_rectangle(pos_min.x, pos_min.y, pos_max.x, pos_max.y, fill = "#000000", width = 0)
@@ -136,12 +136,15 @@ mat_blue = data.Material(data.material_default,
 	translucency = 0,
 )
 
-db = data.Voxels()
-db.set_voxel_area(vec3(-8, -8, 8), vec3(8, 8, 8), mat_red)
-db.set_voxel_area(vec3(8, -8, -8), vec3(8, 8, 8), mat_green)
-db.set_voxel_area(vec3(-8, -8, -8), vec3(8, -8, 8), mat_blue)
+obj_environment = data.Object(origin = vec3(0, 0, 0), size = vec3(16, 16, 16), active = True)
+obj_environment.set_voxel_area(None, vec3(0, 0, 0), vec3(15, 15, 0), mat_red)
+obj_environment.set_voxel_area(None, vec3(0, 0, 0), vec3(0, 15, 15), mat_green)
+obj_environment.set_voxel_area(None, vec3(0, 15, 0), vec3(15, 15, 15), mat_blue)
 
-Window(db,
+objects = []
+objects.append(obj_environment)
+
+Window(objects,
 	width = 120,
 	height = 60,
 	scale = 8,

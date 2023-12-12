@@ -8,7 +8,7 @@ Use the WASDRF keys to move forward, backward, left, right, up, down. Use the ar
 
 ## Camera settings
 
-The Window class in init.py is responsible for creating the window and its associated raytracer. When created it takes a voxels database containing registered materials which also holds voxel positions, as well as a list of settings describing how the engine should behave. Settings include:
+The Window class in init.py is responsible for creating the window and its associated raytracer. When created it takes an array of objects that will be drawn, as well as a list of settings describing how the engine should behave. Settings include:
 
   - width: Number of horizontal pixels, higher values allow more detail but greatly affect performance.
   - height: Number of vertical pixels.
@@ -24,6 +24,12 @@ The Window class in init.py is responsible for creating the window and its assoc
   - terminate_hits: Limits the number of times a ray may hit a voxel before sampling stops. 0 disables and is unlimited, 1 only allows direct hits (no bounces), 2 and above allows `this - 1` number of bounces. Note that transparent voxels count as hits, if volumetric fog is decreasing draw distance increase or disable this.
   - terminate_random: Probability that sampling stops earlier the further a ray has traveled. 0 disables and lets all rays run at their full lifetime, 0.5 allows probabilistic termination to occur from halfway through a ray's life, 1 may terminate all rays but those just spawned in front of the camera. Improves performance but introduces noise in the distance.
   - threads: The number of threads to use for ray tracing by the thread pool, 0 will use all CPU cores.
+
+The object list is the first property that must be passed to the Window class. Object arguments include:
+
+  - origin: The center of the object will be located at this point in space.
+  - size: The bounding box of this object. Light rays will first make sure they're located inside this box before checking voxels. Voxels may only be added within the bounderies of this box, anything else will be ignored and produce a warning.
+  - active: Can be set to false to quickly disable this object so it's ignored by the raytracer. This is ideal as checking ray intersections with bounding boxes can be costly.
 
 ## Default material settings
 

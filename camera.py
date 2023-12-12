@@ -8,7 +8,7 @@ import random
 import data
 
 class Camera:
-	def __init__(self, data: data.Voxels, **settings):
+	def __init__(self, objects: list, **settings):
 		# Store relevant settings
 		self.width = int(settings["width"] or 120)
 		self.height = int(settings["height"] or 60)
@@ -19,7 +19,7 @@ class Camera:
 		self.dist_max = int(settings["dist_max"] or 24)
 		self.terminate_hits = int(settings["terminate_hits"] or 0)
 		self.terminate_random = float(settings["terminate_random"] or 0)
-		self.data = data
+		self.objects = objects
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
 		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
@@ -34,7 +34,7 @@ class Camera:
 		# Obtain the 2D position of this pixel in the viewport as: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
 		# Pixel position is converted to a ray velocity based on the lens distorsion defined by FOV and randomly offset by DOF
 		px_col = None
-		px_pos = line_to_rect(i, self.width)
+		px_pos = index_vec2(i, self.width)
 		lens_x = (-0.5 + px_pos.x / self.width) / self.proportions * ((self.fov + rand(self.dof)) * math.pi / 4)
 		lens_y = (-0.5 + px_pos.y / self.height) * self.proportions * ((self.fov + rand(self.dof)) * math.pi / 4)
 
@@ -65,18 +65,22 @@ class Camera:
 		while ray.step < ray.life:
 			ray.step += 1
 			ray.pos += ray.vel
-			mat = self.data.get_voxel(ray.pos.round())
-			if mat:
-				ray.hits += 1
-				ray.neighbors = [
-					self.data.get_voxel(ray.pos.round() + vec3(-1, 0, 0)),
-					self.data.get_voxel(ray.pos.round() + vec3(+1, 0, 0)),
-					self.data.get_voxel(ray.pos.round() + vec3(0, -1, 0)),
-					self.data.get_voxel(ray.pos.round() + vec3(0, +1, 0)),
-					self.data.get_voxel(ray.pos.round() + vec3(0, 0, -1)),
-					self.data.get_voxel(ray.pos.round() + vec3(0, 0, +1)),
-				]
-				mat.function(ray, mat)
+			pos_int = ray.pos.round()
+			for obj in self.objects:
+				if obj.active and obj.intersects(pos_int):
+					pos = obj.pos_rel(pos_int)
+					mat = obj.get_voxel(None, pos)
+					if mat:
+						ray.hits += 1
+						ray.neighbors = [
+							obj.get_voxel(None, pos + vec3(-1, 0, 0)),
+							obj.get_voxel(None, pos + vec3(+1, 0, 0)),
+							obj.get_voxel(None, pos + vec3(0, -1, 0)),
+							obj.get_voxel(None, pos + vec3(0, +1, 0)),
+							obj.get_voxel(None, pos + vec3(0, 0, -1)),
+							obj.get_voxel(None, pos + vec3(0, 0, +1)),
+						]
+						mat.function(ray, mat)
 			if self.fog and ray.step / ray.life > self.fog:
 				ray.alpha *= 1 - (ray.step / ray.life) * self.fog
 			if self.terminate_hits and ray.hits >= self.terminate_hits:
