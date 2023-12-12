@@ -69,17 +69,9 @@ class Camera:
 			for obj in self.objects:
 				if obj.active and obj.intersects(pos_int):
 					pos = obj.pos_rel(pos_int)
-					mat = obj.get_voxel(None, pos)
+					mat = obj.get_voxel(pos)
 					if mat:
 						ray.hits += 1
-						ray.neighbors = [
-							obj.get_voxel(None, pos + vec3(-1, 0, 0)),
-							obj.get_voxel(None, pos + vec3(+1, 0, 0)),
-							obj.get_voxel(None, pos + vec3(0, -1, 0)),
-							obj.get_voxel(None, pos + vec3(0, +1, 0)),
-							obj.get_voxel(None, pos + vec3(0, 0, -1)),
-							obj.get_voxel(None, pos + vec3(0, 0, +1)),
-						]
 						mat.function(ray, mat)
 			if self.fog and ray.step / ray.life > self.fog:
 				ray.alpha *= 1 - (ray.step / ray.life) * self.fog

@@ -33,11 +33,14 @@ The object list is the first property that must be passed to the Window class. O
 
 ## Default material settings
 
-A material is registered using the register_material call of the Voxels class with a name, function, and list of settings. This is a list of the properties used to customize the default shader function, see the material programming section below on programming custom material functions.
+A material is registered using the register_material call with a list of settings. Materials can be modified per voxel: A custom object function or external script may change the material properties of a particular voxel without affecting other voxels or the original material definition. Below is a list of properties used to customize the default shader function or specify your own, unique properties are supported for use in custom material functions.
 
+  - function: Material function to call when a ray hits this material, use material_default unless you want a custom shader. 
   - albedo: The color of this material in hex format, eg: `#ff7f00`.
   - roughness: This amount of random roughness is added to the ray velocity when reflected or refracted.
-  - translucency: Chance that a ray will pass through this voxel instead of being bounced back, probabilistically simulates transparency. Can be used to create volumetric fog, this is very costly and should only be done in small areas.
+  - translucency: Chance that a ray will pass through this voxel instead of being bounced back, probabilistically simulates transparency. Can be used to create volumetric fog, this is costly and should be done in small areas.
+  - group: Builtin material property representing a group other materials should interact with. Voxels will only treat neighbors with the same value as solid when calculating surface normals.
+  - normals: Builtin material property set by objects when updating voxels, does not need to be included in the material definition. Represents the directions in which this voxel contains open spaces, used to determine face direction for reflecting rays. Neighbor order is `-x +x -y +y -z +z`.
 
 ## Material programming
 
@@ -52,4 +55,5 @@ A material function takes two parameters: The ray properties and the material we
   - step: The number of steps this ray has preformed. 1 is a ray that was just spawned at the camera's minimum draw distance, if `step` equals `life - 1` this is the last move the ray will preform. Can be modified to shorten or prolong the life of a ray.
   - life: The maximum number of steps this ray can preform before the resulting color is drawn. Starts at `dist_max - dist_min`, like `step` it can be modified to make ray life and draw distance shorter or longer.
   - hits: Number of times this voxel has bounced, limited by the `hits` camera setting. Current hit is accounted for so this always starts at 1. Keep in mind that hitting a translucent material may or may not increase this by random chance.
-  - neighbors: A list of 6 entries containing the materials of direct neighbors of this voxel in the order: -x, +x, -y, +y, -z, +z. Primarily used to estimate face direction for ray reflection or refraction. Readonly, this is overwritten by the raytracer each hit.
+
+Note that while you can modify any of the above properties on the material of a voxel from the material function, such modifications will be lost: Threads don't share changes with each other or the main thread, any modification will only be seen by the same process currently calculating the ray. If you wish to change a property on a voxel's material, do so in a custom function which ensures changes are returned to the main thread.

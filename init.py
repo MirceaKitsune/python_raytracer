@@ -120,26 +120,32 @@ class Window:
 		self.root.after(int(time_next), self.update)
 
 # Spawn test environment
-mat_red = data.Material(data.material_default,
+mat_red = data.Material(
+	function = data.material_default,
 	albedo = rgb(255, 0, 0),
 	roughness = 0.1,
 	translucency = 0,
+	group = "solid",
 )
-mat_green = data.Material(data.material_default,
+mat_green = data.Material(
+	function = data.material_default,
 	albedo = rgb(0, 255, 0),
 	roughness = 0.1,
 	translucency = 0,
+	group = "solid",
 )
-mat_blue = data.Material(data.material_default,
+mat_blue = data.Material(
+	function = data.material_default,
 	albedo = rgb(0, 0, 255),
 	roughness = 0.1,
 	translucency = 0,
+	group = "solid",
 )
 
 obj_environment = data.Object(origin = vec3(0, 0, 0), size = vec3(16, 16, 16), active = True)
-obj_environment.set_voxel_area(None, vec3(0, 0, 0), vec3(15, 15, 0), mat_red)
-obj_environment.set_voxel_area(None, vec3(0, 0, 0), vec3(0, 15, 15), mat_green)
-obj_environment.set_voxel_area(None, vec3(0, 15, 0), vec3(15, 15, 15), mat_blue)
+obj_environment.set_voxel_area(vec3(0, 0, 0), vec3(15, 15, 0), mat_red)
+obj_environment.set_voxel_area(vec3(0, 0, 0), vec3(0, 15, 15), mat_green)
+obj_environment.set_voxel_area(vec3(0, 15, 0), vec3(15, 15, 15), mat_blue)
 
 objects = []
 objects.append(obj_environment)

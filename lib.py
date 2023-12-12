@@ -75,6 +75,32 @@ class vec3:
 			self.y = self.y / ref
 			self.z = self.z / ref
 
+# vec2 and vec3 helpers, most notably the conversion function allowing vectors to be converted to and from an integer
+# As ray calculations can be costly, ordered lists are used to store spatial data at integer positions without having to specify a position vector
+# The index of the list item can be used to deduce the position in 2D or 3D space via these functions, eg: index 5 is vec2(1, 1) in a 4 x 4 square
+def index_vec2(i: int, width: int):
+	y, x = divmod(i, width)
+	return vec2(x, y)
+
+def vec2_index(v: vec2, width: int):
+	return int(v.x + v.y * width)
+
+def vec2_neighbors(pos: vec2):
+	# Neighbor order: -x, +x, -y, +y
+	return [pos - vec2(1, 0), pos + vec2(1, 0), pos - vec2(0, 1), pos + vec2(0, 1)]
+
+def index_vec3(i: int, width: int, height: int):
+	z, xy = divmod(i, width * height)
+	y, x = divmod(xy, width)
+	return vec3(x, y, z)
+
+def vec3_index(v: vec3, width: int, height: int):
+	return int(v.x + v.y * width + v.z * width * height)
+
+def vec3_neighbors(pos: vec3):
+	# Neighbor order: -x, +x, -y, +y, -z, +z
+	return [pos - vec3(1, 0, 0), pos + vec3(1, 0, 0), pos - vec3(0, 1, 0), pos + vec3(0, 1, 0), pos - vec3(0, 0, 1), pos + vec3(0, 0, 1)]
+
 # RGB: Stores color in RGB format, handles conversion between RGB and HEX (eg: "255, 127, 0" = #ff7f00)
 class rgb:
 	def __init__(self, r: int, g: int, b: int):
@@ -91,24 +117,6 @@ class rgb:
 
 def hex_to_rgb(s: str):
 	return rgb(int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
-
-# Conversion functions allowing a vec2 or vec3 to be converted to and from an integer
-# As ray calculations can be costly, ordered lists are used to store spatial data at integer positions without having to specify a position vector
-# The index of the list item can be used to deduce the position in 2D or 3D space via these functions, eg: index 5 is vec2(1, 1) in a 4 x 4 square
-def index_vec2(i: int, width: int):
-	y, x = divmod(i, width)
-	return vec2(x, y)
-
-def vec2_index(v: vec2, width: int):
-	return int(v.x + v.y * width)
-
-def index_vec3(i: int, width: int, height: int):
-	z, xy = divmod(i, width * height)
-	y, x = divmod(xy, width)
-	return vec3(x, y, z)
-
-def vec3_index(v: vec3, width: int, height: int):
-	return int(v.x + v.y * width + v.z * width * height)
 
 # Random: Returns a random number with an amplitude, eg: 1 can be anything between -1 and +1
 def rand(amp: float):
