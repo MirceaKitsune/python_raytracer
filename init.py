@@ -11,8 +11,8 @@ import camera
 class Window:
 	def __init__(self, objects: list, **settings):
 		# Store relevant settings
-		self.width = int(settings["width"] or 120)
-		self.height = int(settings["height"] or 60)
+		self.width = int(settings["width"] or 96)
+		self.height = int(settings["height"] or 54)
 		self.scale = int(settings["scale"] or 4)
 		self.fps = int(settings["fps"] or 30)
 		self.px_burn = float(settings["px_burn"] or 0)
@@ -42,14 +42,14 @@ class Window:
 		self.canvas_pixels = []
 		for i in range(0, self.width * self.height):
 			pos = index_vec2(i, self.width)
-			pos_min = vec2(pos.x * self.scale, pos.y * self.scale)
-			pos_max = vec2(pos_min.x + self.scale, pos_min.y + self.scale)
+			pos_min = pos * self.scale
+			pos_max = pos_min + self.scale
 			canvas_rect = self.canvas.create_rectangle(pos_min.x, pos_min.y, pos_max.x, pos_max.y, fill = "#000000", width = 0)
 			self.canvas_pixels.append(canvas_rect)
 			self.pixels.append(rgb(0, 0, 0))
 
 		# Configure info text
-		self.canvas_info = self.canvas.create_text(10, 10, font = ("Purisa", self.scale) , anchor = "nw", fill = "#ffffff")
+		self.canvas_info = self.canvas.create_text(10, 10, font = ("Purisa", 8) , anchor = "nw", fill = "#ffffff")
 
 		# Start the main loop and update function, a timer is used to keep track of update rate
 		self.time = 0
@@ -59,7 +59,7 @@ class Window:
 	def onKeyPress(self, event):
 		# Movement keys
 		if event.keysym.lower() in "wasdrf":
-			d = self.cam.rot.dir()
+			d = self.cam.rot.dir(False)
 			if event.keysym.lower() == "w":
 				self.cam.pos += vec3(+d.x, +d.y, +d.z)
 			elif event.keysym.lower() == "s":
@@ -111,7 +111,7 @@ class Window:
 						self.pixels[i] = col
 
 			# Measure the time before and after the update to deduce practical FPS
-			info_text = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(round(1 / delay)) + " / " + str(self.fps) + " FPS"
+			info_text = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(int(1 / delay)) + " / " + str(self.fps) + " FPS"
 			self.canvas.itemconfig(self.canvas_info, text = info_text)
 
 			self.root.update_idletasks()
@@ -149,19 +149,19 @@ objects = []
 objects.append(obj_environment)
 
 Window(objects,
-	width = 120,
-	height = 60,
+	width = 96,
+	height = 54,
 	scale = 8,
 	fps = 30,
 	fov = 90,
 	dof = 1,
 	fog = 0.5,
-	px_skip = 0.5,
+	px_skip = 0.75,
 	px_burn = 0.5,
 	px_blur = 0.25,
 	dist_min = 2,
-	dist_max = 24,
-	terminate_hits = 1,
-	terminate_dist = 0.25,
+	dist_max = 48,
+	terminate_hits = 2,
+	terminate_dist = 0.5,
 	threads = 4,
 )

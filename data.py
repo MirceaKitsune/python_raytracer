@@ -6,10 +6,15 @@ import random
 
 # Default material function, mods can provide materials that use their own functions if desired
 def material_default(ray, mat):
-	# Color: Use material color darkened by alpha value, mixing reduces with the number of hits
+	# Color: Use material color darkened by alpha value, mixing reduces with the number of hits as bounces lose energy
 	col = mat.albedo.mix(rgb(0, 0, 0), 1 - ray.alpha)
 	col_mix = 1 / ray.hits
-	ray.col = ray.col and ray.col.mix(col, 1 / ray.hits) or col
+	ray.col = ray.col and ray.col.mix(col, col_mix) or col
+
+	# Roughness: Velocity is randomized with the roughness value, a roughness of 1 can send the ray in almost any direction
+	# Shorten the life of rough rays as they're less likely to contribute useful information while encouraging noise
+	ray.vel += vec3(rand(mat.roughness), rand(mat.roughness), rand(mat.roughness))
+	ray.life = int(ray.life * (1 - mat.roughness))
 
 	# Velocity: Estimate the normal direction of the voxel based on its neighbors, bounce the ray back for solid bounces but not translucent ones
 	# Reflections may occur in one or all three axis, diagonal face normals are not supported but corner voxels may act as a 45* mirror
@@ -26,8 +31,6 @@ def material_default(ray, mat):
 			ray.vel.z *= -1
 		elif ray.vel.z < 0 and mat.normals[5]:
 			ray.vel.z *= -1
-	ray.vel += vec3(rand(mat.roughness), rand(mat.roughness), rand(mat.roughness))
-	ray.vel.normalize()
 
 class Material:
 	def __init__(self, **settings):
@@ -43,11 +46,12 @@ class Material:
 
 class Object:
 	def __init__(self, **settings):
-		# Origin is the center of the object, box is a list of the form [-x, +x, -y, +y, -z, +z] updated only when moving the object to avoid costly checks during ray tracing
+		# Origin is the center of the object, mins and maxs represent the start and end corners, updated when moving the object to avoid costly checks during ray tracing
 		self.origin = settings["origin"] or vec3(0, 0, 0)
 		self.size = settings["size"] or vec3(0, 0, 0)
 		self.active = settings["active"] or False
-		self.box = [0, 0, 0, 0, 0, 0]
+		self.mins = vec3(0, 0, 0)
+		self.maxs = vec3(0, 0, 0)
 		self.move(self.origin)
 
 		# Initialize the voxel list with empty material positions filling the bounding box of this object
@@ -60,29 +64,31 @@ class Object:
 
 	# Check whether a point position is inside the bounding box of this object
 	def intersects(self, pos: vec3):
-		if pos.x <= self.box[1] and pos.x > self.box[0]:
-			if pos.y <= self.box[3] and pos.y > self.box[2]:
-				if pos.z <= self.box[5] and pos.z > self.box[4]:
+		if pos.x <= self.maxs.x and pos.x > self.mins.x:
+			if pos.y <= self.maxs.y and pos.y > self.mins.y:
+				if pos.z <= self.maxs.z and pos.z > self.mins.z:
 					return True
 		return False
 
 	# Check whether another box intersects the bounding box of this object, pos_min and pos_max represent the corners of the other box
 	def intersects_box(self, pos_min: vec3, pos_max: vec3):
-		if pos_min.x <= self.box[1] and pos_max.x > self.box[0]:
-			if pos_min.y <= self.box[3] and pos_max.y > self.box[2]:
-				if pos_min.z <= self.box[5] and pos_max.z > self.box[4]:
+		if pos_min.x <= self.maxs.x and pos_max.x > self.mins.x:
+			if pos_min.y <= self.maxs.y and pos_max.y > self.mins.y:
+				if pos_min.z <= self.maxs.z and pos_max.z > self.mins.z:
 					return True
 		return False
 
 	# Returns position relative to the minimum corner, add range 0 to self.size to get a particular voxel
 	def pos_rel(self, pos: vec3):
-		return vec3(self.box[1] - pos.x, self.box[3] - pos.y, self.box[5] - pos.z)
+		return self.maxs - pos
 
 	# Moves this object to a new origin, update mins and maxs to represent the bounding box in space
 	def move(self, pos):
-		self.origin = pos.round()
-		size = vec3(round(self.size.x / 2), round(self.size.y / 2), round(self.size.z / 2))
-		self.box = [self.origin.x - size.x, self.origin.x + size.x, self.origin.y - size.y, self.origin.y + size.y, self.origin.z - size.z, self.origin.z + size.z]
+		self.origin = pos.int()
+		size = self.size / 2
+		size = size.int()
+		self.mins = self.origin - size
+		self.maxs = self.origin + size
 
 	# Remove a sprite from the sprite list
 	def del_sprite(self, sprite: str):

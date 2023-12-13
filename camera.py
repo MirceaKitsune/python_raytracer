@@ -26,7 +26,7 @@ class Camera:
 		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
 
 	def move(axis: int, amount: float):
-		self.pos += self.rot.dir() * vec3(amount, amount, amount)
+		self.pos += self.rot.dir(False) * amount
 
 	def rotate(rot: vec3):
 		self.rot = self.rot.rotate(rot)
@@ -48,14 +48,14 @@ class Camera:
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
 		ray_rot = self.rot.clone()
 		ray_rot = ray_rot.rotate(vec3(0, -lens_y, +lens_x))
-		ray_dir = ray_rot.dir()
-		ray_dir.normalize()
+		ray_dir = ray_rot.dir(True)
+		ray_dir = ray_dir.normalize()
 
 		# Ray data is kept in a data store so it can be easily delivered to material functions and support custom properties
 		ray = store(
 			col = None,
 			alpha = 1,
-			pos = self.pos + ray_dir * vec3(self.dist_min, self.dist_min, self.dist_min),
+			pos = self.pos + ray_dir * self.dist_min,
 			vel = ray_dir,
 			step = 0,
 			life = self.dist_max - self.dist_min,
@@ -70,7 +70,7 @@ class Camera:
 		while ray.step < ray.life:
 			ray.step += 1
 			ray.pos += ray.vel
-			pos_int = ray.pos.round()
+			pos_int = ray.pos.int()
 			for obj in self.objects:
 				if obj.active and obj.intersects(pos_int):
 					pos = obj.pos_rel(pos_int)
@@ -78,11 +78,15 @@ class Camera:
 					if mat:
 						ray.hits += 1
 						mat.function(ray, mat)
+						ray.vel.normalize()
+
+			# Terminate this ray earlier in some circumstances to improve performance
+			ray_time = ray.step / ray.life
 			if ray.hits > self.terminate_hits:
 				break
-			if ray.step / ray.life > 1 - self.terminate_dist * random.random():
+			elif ray_time > 1 - self.terminate_dist * random.random():
 				break
-			if ray.step / ray.life > 1 - self.fog:
+			elif ray_time > 1 - self.fog:
 				ray.alpha *= self.fog
 
 		# Once ray calculations are done, return the resulting color in hex format or black if no changes were made
