@@ -15,10 +15,11 @@ class Camera:
 		self.fov = float(settings["fov"] or 90)
 		self.dof = float(settings["dof"] or 0)
 		self.fog = float(settings["fog"] or 0)
+		self.px_skip = float(settings["px_skip"] or 0)
 		self.dist_min = int(settings["dist_min"] or 0)
 		self.dist_max = int(settings["dist_max"] or 24)
 		self.terminate_hits = int(settings["terminate_hits"] or 0)
-		self.terminate_random = float(settings["terminate_random"] or 0)
+		self.terminate_dist = float(settings["terminate_dist"] or 0)
 		self.objects = objects
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
@@ -31,6 +32,10 @@ class Camera:
 		self.rot = self.rot.rotate(rot)
 
 	def trace(self, i):
+		# Allow probabilistically skiping pixel recalculation each frame
+		if self.px_skip > random.random():
+			return ""
+
 		# Obtain the 2D position of this pixel in the viewport as: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
 		# Pixel position is converted to a ray velocity based on the lens distorsion defined by FOV and randomly offset by DOF
 		px_col = None
@@ -73,15 +78,15 @@ class Camera:
 					if mat:
 						ray.hits += 1
 						mat.function(ray, mat)
-			if self.fog and ray.step / ray.life > self.fog:
-				ray.alpha *= 1 - (ray.step / ray.life) * self.fog
-			if self.terminate_hits and ray.hits >= self.terminate_hits:
+			if ray.hits > self.terminate_hits:
 				break
-			if 1 - ray.step / ray.life < random.random() * self.terminate_random:
+			if ray.step / ray.life > 1 - self.terminate_dist * random.random():
 				break
+			if ray.step / ray.life > 1 - self.fog:
+				ray.alpha *= self.fog
 
 		# Once ray calculations are done, return the resulting color in hex format or black if no changes were made
 		return ray.col and ray.col.get_hex() or "000000"
 
-	def get(self, width, height, pool, chunks):
+	def get(self, width, height, pool):
 		return pool.map(self.trace, range(0, width * height))
