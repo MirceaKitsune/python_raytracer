@@ -2,9 +2,23 @@
 
 Experimental CPU based voxel raytracing engine written in Python, requires Tkinter. No meshes or textures: Everything is a floating point defined by a material. Materials can define their own functions as custom shaders. Designed for use at low resolutions and frame rates, the ray tracing algorithm is meant to be simple and efficient so expect noise and inaccuracy by design.
 
-## Movement
+![alt text](cover.png)
 
-Use the WASDRF keys to move forward, backward, left, right, up, down. Use the arrow keys to change angle. Camera roll is not supported by the vector class. Mouse support is currently not implemented due to issues with pointer snapping.
+To run just execute `python3 ./init.py` which will start the engine with the default test scene. Use the WASDRF keys to move forward, backward, left, right, up, down... use the arrow keys to change angle. The code is under the GPL license, created and developed by MirceaKitsune.
+
+## Features and TODO
+
+  - [x] Programmable material functions. Each voxel can hold both unique material properties as well as a function that tells light rays how to behave upon collision.
+  - [ ] Finish all basic material properties: Reflection (done), refraction, metalicity, emission, subsurface scattering. Currently there is no lighting system.
+  - [ ] Add a skybox system and support environment lighting. Currently everything not hit by a ray is a black void.
+  - [ ] Implement mouse movement to support mouse look. At the moment this isn't doable due to Tkinter being unable to snap the pointer to the center of the screen.
+  - [ ] Support cammera rolling if this becomes possible. Current vector math doesn't support a third axis of transformation, you can only look horizontally and vertically.
+  - [ ] Add perlin noise. May be possible to support an object based chunk system for generating infinite terrain.
+  - [ ] Create a script to convert image slices into pixel meshes. This will allow importing 3D sprites from 2D images.
+  - [ ] Support sprite animation. Basic support for sprite sets already exists: Once images can be imported as sprites allow changing the mesh periodically to play animations.
+  - [ ] Allow object rotation. Fine rotation will likely never be possible, but rotations of 90* / 180* / 270* will be possible to support in the future.
+  - [ ] Support object movement and a basic physics system. Objects can only move at integer positions, collisions will be checked by finding intersecting voxels. May require a separate thread pool.
+  - [ ] Sound support in the form of either audio files or a frequency generator associated with materials. Audio is also intended to be raytraced.
 
 ## Camera settings
 
@@ -17,9 +31,9 @@ The Window class in init.py is responsible for creating the window and its assoc
   - fov: Field of view in degrees, higher values make the viewport wider.
   - dof: Depth of field in degrees, higher values result in more randomness added to the initial ray velocity and distance blur.
   - fog: Amount by which distant rays will gradually fade before vanishing. Not to be confused with real volumetric fog, this only affects the alpha value used to indicate ray blending to material functions. 0 disables fog fading, higher values push the effect further while making it sharper.
-  - px_skip: Random chance that a pixel may not be calculated each frame. Improves both viewport and raytracing performance at the cost of increased grain since pixels may take a few frames to refresh.
-  - px_burn: Retinal burn / iris adaptation effect. Since updates to the canvas can be costly, this improves performance by allowing a probabilistic threshold for pixels to be updated based on changes in color level. 0 disables and updates all colors immediately, higher values prioritize noticeable differences and delay minor ones. Produces temporary smudges and helps smoothen out sudden noise.
-  - px_blur: Simulates motion blur and DOF edge smoothing, also acts as a cheaper alternative to multisampling. Each frame the previous color of the pixel is gradually blended with the new color by this amount. 0 disables and will look very rough, higher values reduce noise and make viewport updates smoother. No performance benefit but looks better.
+  - skip: Pixels that are closer to the edge of the screen have a random chance of not being recalculated each frame. Improves both viewport and raytracing performance, at the cost of increased grain in the corners of the viewport where pixels may take a few frames to refresh.
+  - iris: Retinal burn / iris adaptation effect. Since updates to the canvas can be costly, this improves performance by allowing a probabilistic threshold for pixels to be updated based on changes in color level. 0 disables and updates all colors immediately, higher values prioritize noticeable differences and delay minor ones. Produces temporary smudges and helps smoothen out sudden noise.
+  - blur: Simulates motion blur and DOF edge smoothing, also acts as a cheaper alternative to multisampling. Each frame the previous color of the pixel is gradually blended with the new color by this amount. 0 disables and will look very rough, higher values reduce noise and make viewport updates smoother. No performance benefit but looks better.
   - dist_min: Minimum ray distance, voxels won't be checked until the ray has preformed this number of steps.
   - dist_max: Maximum ray distance, calculation stops and ray color is returned after this number of steps have been preformed.
   - terminate_hits: Limits the number of times a ray may hit a voxel before sampling stops. 0 only allows direct hits (no bounces), 1 and above allow this number of bounces. Note that transparent voxels count as hits, if volumetric fog is decreasing draw distance increase this value.

@@ -15,7 +15,7 @@ class Camera:
 		self.fov = float(settings["fov"] or 90)
 		self.dof = float(settings["dof"] or 0)
 		self.fog = float(settings["fog"] or 0)
-		self.px_skip = float(settings["px_skip"] or 0)
+		self.skip = float(settings["skip"] or 0)
 		self.dist_min = int(settings["dist_min"] or 0)
 		self.dist_max = int(settings["dist_max"] or 24)
 		self.terminate_hits = int(settings["terminate_hits"] or 0)
@@ -32,22 +32,24 @@ class Camera:
 		self.rot = self.rot.rotate(rot)
 
 	def trace(self, i):
-		# Allow probabilistically skiping pixel recalculation each frame
-		if self.px_skip > random.random():
-			return ""
-
 		# Obtain the 2D position of this pixel in the viewport as: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
+		pos = index_vec2(i, self.width)
+		ofs_x = (-0.5 + pos.x / self.width) * 2
+		ofs_y = (-0.5 + pos.y / self.height) * 2
+
+		# Probabilistically skip pixel recalculation for pixels closer to the screen edge
+		if max(abs(ofs_x), abs(ofs_y)) * self.skip > random.random():
+			return None
+
 		# Pixel position is converted to a ray velocity based on the lens distorsion defined by FOV and randomly offset by DOF
-		px_col = None
-		px_pos = index_vec2(i, self.width)
-		lens_x = (-0.5 + px_pos.x / self.width) / self.proportions * ((self.fov + rand(self.dof)) * math.pi / 4)
-		lens_y = (-0.5 + px_pos.y / self.height) * self.proportions * ((self.fov + rand(self.dof)) * math.pi / 4)
+		lens_fov = (self.fov + rand(self.dof)) * math.pi / 8
+		lens_x = ofs_x / self.proportions * lens_fov
+		lens_y = ofs_y * self.proportions * lens_fov
 
 		# Randomly offset the ray's angle based on the DOF setting, fetch its direction and use it as the ray velocity
 		# Velocity must be normalized as voxels need to be checked at all integer positions, the speed of light is always 1
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
-		ray_rot = self.rot.clone()
-		ray_rot = ray_rot.rotate(vec3(0, -lens_y, +lens_x))
+		ray_rot = self.rot.rotate(vec3(0, -lens_y, +lens_x))
 		ray_dir = ray_rot.dir(True)
 		ray_dir = ray_dir.normalize()
 
@@ -92,5 +94,5 @@ class Camera:
 		# Once ray calculations are done, return the resulting color in hex format or black if no changes were made
 		return ray.col and ray.col.get_hex() or "000000"
 
-	def get(self, width, height, pool):
-		return pool.map(self.trace, range(0, width * height))
+	def pool(self, pool, pixels):
+		return pool.map(self.trace, pixels)

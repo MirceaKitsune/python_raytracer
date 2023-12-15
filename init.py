@@ -15,8 +15,8 @@ class Window:
 		self.height = int(settings["height"] or 54)
 		self.scale = int(settings["scale"] or 4)
 		self.fps = int(settings["fps"] or 30)
-		self.px_burn = float(settings["px_burn"] or 0)
-		self.px_blur = float(settings["px_blur"] or 0)
+		self.iris = float(settings["iris"] or 0)
+		self.blur = float(settings["blur"] or 0)
 		self.threads = int(settings["threads"] or mp.cpu_count())
 
 		# Setup the camera and thread pool that will be used to update this window
@@ -98,14 +98,14 @@ class Window:
 			# Request the camera to compute new pixels, then update each canvas rectangle element to display the new color data
 			# The 2D position of each pixel is stored as its index and implicitly known here
 			# The color burn effect is used to improve viewport performance by probabilistically skipping redraws of pixels who's color hasn't changes a lot
-			result = self.cam.get(self.width, self.height, self.pool)
+			result = self.cam.pool(self.pool, range(0, self.width * self.height))
 			for i, c in enumerate(result):
 				if c and c != self.pixels[i]:
 					col = hex_to_rgb(c)
 					col_old = self.pixels[i]
-					threshold = self.px_burn * random.random()
+					threshold = self.iris * random.random()
 					if abs((col.r - col_old.r) / 255) > threshold or abs((col.g - col_old.g) / 255) > threshold or abs((col.b - col_old.b) / 255) > threshold:
-						col = col.mix(col_old, self.px_blur)
+						col = col.mix(col_old, self.blur)
 						item = self.canvas_pixels[i]
 						self.canvas.itemconfig(item, fill = "#" + col.get_hex())
 						self.pixels[i] = col
@@ -114,7 +114,6 @@ class Window:
 			info_text = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(int(1 / delay)) + " / " + str(self.fps) + " FPS"
 			self.canvas.itemconfig(self.canvas_info, text = info_text)
 
-			self.root.update_idletasks()
 		self.root.after(1, self.update)
 
 # Spawn test environment
@@ -156,9 +155,9 @@ Window(objects,
 	fov = 90,
 	dof = 1,
 	fog = 0.5,
-	px_skip = 0.75,
-	px_burn = 0.5,
-	px_blur = 0.25,
+	skip = 0.75,
+	iris = 0.5,
+	blur = 0.25,
 	dist_min = 2,
 	dist_max = 48,
 	terminate_hits = 2,

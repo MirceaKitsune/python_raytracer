@@ -38,9 +38,6 @@ class vec2:
 		else:
 			return vec2(self.x / other, self.y / other)
 
-	def clone(self):
-		return vec2(self.x, self.y)
-
 	def string(self):
 		return str(self.x) + "," + str(self.y)
 
@@ -90,9 +87,6 @@ class vec3:
 			return vec3(self.x / other.x, self.y / other.y, self.z / other.z)
 		else:
 			return vec3(self.x / other, self.y / other, self.z / other)
-
-	def clone(self):
-		return vec3(self.x, self.y, self.z)
 
 	def string(self):
 		return str(self.x) + "," + str(self.y) + "," + str(self.z)
@@ -159,9 +153,6 @@ class rgb:
 		self.r = int(r)
 		self.g = int(g)
 		self.b = int(b)
-
-	def clone(self):
-		return rgb(self.r, self.g, self.b)
 
 	def mix(self, col, bias1):
 		bias2 = 1 - bias1

@@ -64,17 +64,17 @@ class Object:
 
 	# Check whether a point position is inside the bounding box of this object
 	def intersects(self, pos: vec3):
-		if pos.x <= self.maxs.x and pos.x > self.mins.x:
-			if pos.y <= self.maxs.y and pos.y > self.mins.y:
-				if pos.z <= self.maxs.z and pos.z > self.mins.z:
+		if pos.x < self.maxs.x + 1 and pos.x > self.mins.x:
+			if pos.y < self.maxs.y + 1 and pos.y > self.mins.y:
+				if pos.z < self.maxs.z + 1 and pos.z > self.mins.z:
 					return True
 		return False
 
 	# Check whether another box intersects the bounding box of this object, pos_min and pos_max represent the corners of the other box
 	def intersects_box(self, pos_min: vec3, pos_max: vec3):
-		if pos_min.x <= self.maxs.x and pos_max.x > self.mins.x:
-			if pos_min.y <= self.maxs.y and pos_max.y > self.mins.y:
-				if pos_min.z <= self.maxs.z and pos_max.z > self.mins.z:
+		if pos_min.x < self.maxs.x + 1 and pos_max.x > self.mins.x:
+			if pos_min.y < self.maxs.y + 1 and pos_max.y > self.mins.y:
+				if pos_min.z < self.maxs.z + 1 and pos_max.z > self.mins.z:
 					return True
 		return False
 
