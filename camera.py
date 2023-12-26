@@ -15,31 +15,35 @@ class Camera:
 		self.fov = float(settings["fov"] or 90)
 		self.dof = float(settings["dof"] or 0)
 		self.fog = float(settings["fog"] or 0)
-		self.skip = float(settings["skip"] or 0)
+		self.iris = float(settings["iris"] or 0)
 		self.dist_min = int(settings["dist_min"] or 0)
 		self.dist_max = int(settings["dist_max"] or 24)
-		self.terminate_hits = int(settings["terminate_hits"] or 0)
+		self.terminate_hits = float(settings["terminate_hits"] or 0)
 		self.terminate_dist = float(settings["terminate_dist"] or 0)
 		self.objects = objects
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
 		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
+		self.weights = [1] * (self.width * self.height)
 
-	def move(axis: int, amount: float):
+	def set_weight(self, i: int, amount: float):
+		self.weights[i] = amount
+
+	def move(self, axis: int, amount: float):
 		self.pos += self.rot.dir(False) * amount
 
-	def rotate(rot: vec3):
+	def rotate(self, rot: vec3):
 		self.rot = self.rot.rotate(rot)
 
 	def trace(self, i):
+		# Probabilistically skip pixel recalculation based on weight
+		if (1 - self.weights[i]) * self.iris > random.random():
+			return None
+
 		# Obtain the 2D position of this pixel in the viewport as: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
 		pos = index_vec2(i, self.width)
 		ofs_x = (-0.5 + pos.x / self.width) * 2
 		ofs_y = (-0.5 + pos.y / self.height) * 2
-
-		# Probabilistically skip pixel recalculation for pixels closer to the screen edge
-		if max(abs(ofs_x), abs(ofs_y)) * self.skip > random.random():
-			return None
 
 		# Pixel position is converted to a ray velocity based on the lens distorsion defined by FOV and randomly offset by DOF
 		lens_fov = (self.fov + rand(self.dof)) * math.pi / 8
@@ -78,21 +82,18 @@ class Camera:
 					pos = obj.pos_rel(pos_int)
 					mat = obj.get_voxel(pos)
 					if mat:
-						ray.hits += 1
 						mat.function(ray, mat)
-						ray.vel.normalize()
 
 			# Terminate this ray earlier in some circumstances to improve performance
-			ray_time = ray.step / ray.life
-			if ray.hits > self.terminate_hits:
+			if ray.hits > 0 and self.terminate_hits / ray.hits < random.random():
 				break
-			elif ray_time > 1 - self.terminate_dist * random.random():
+			elif ray.step / ray.life > 1 - self.terminate_dist * random.random():
 				break
-			elif ray_time > 1 - self.fog:
+			elif ray.step / ray.life > 1 - self.fog:
 				ray.alpha *= self.fog
 
 		# Once ray calculations are done, return the resulting color in hex format or black if no changes were made
 		return ray.col and ray.col.get_hex() or "000000"
 
-	def pool(self, pool, pixels):
-		return pool.map(self.trace, pixels)
+	def pool(self, pool):
+		return pool.map(self.trace, range(0, self.width * self.height))

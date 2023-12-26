@@ -8,13 +8,11 @@ import random
 def material_default(ray, mat):
 	# Color: Use material color darkened by alpha value, mixing reduces with the number of hits as bounces lose energy
 	col = mat.albedo.mix(rgb(0, 0, 0), 1 - ray.alpha)
-	col_mix = 1 / ray.hits
+	col_mix = 1 / (1 + ray.hits)
 	ray.col = ray.col and ray.col.mix(col, col_mix) or col
 
 	# Roughness: Velocity is randomized with the roughness value, a roughness of 1 can send the ray in almost any direction
-	# Shorten the life of rough rays as they're less likely to contribute useful information while encouraging noise
 	ray.vel += vec3(rand(mat.roughness), rand(mat.roughness), rand(mat.roughness))
-	ray.life = int(ray.life * (1 - mat.roughness))
 
 	# Velocity: Estimate the normal direction of the voxel based on its neighbors, bounce the ray back for solid bounces but not translucent ones
 	# Reflections may occur in one or all three axis, diagonal face normals are not supported but corner voxels may act as a 45* mirror
@@ -31,6 +29,12 @@ def material_default(ray, mat):
 			ray.vel.z *= -1
 		elif ray.vel.z < 0 and mat.normals[5]:
 			ray.vel.z *= -1
+	ray.vel = ray.vel.normalize()
+
+	# Hits: Increase the number of hits based on material translucency
+	ray.hits += 1 - mat.translucency
+
+	return True
 
 class Material:
 	def __init__(self, **settings):
@@ -146,7 +150,7 @@ class Object:
 
 		i = vec3_index(pos, self.size.x, self.size.y)
 		if i < len(self.voxels):
-			self.voxels[i] = copy.copy(mat)
+			self.voxels[i] = mat and copy.copy(mat) or None
 
 			# When a voxel changes, its normals as well as those of direct neighbors must be updated to reflect the newly freed / occupied space
 			neighbors = vec3_neighbors(pos)

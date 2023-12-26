@@ -15,7 +15,6 @@ class Window:
 		self.height = int(settings["height"] or 54)
 		self.scale = int(settings["scale"] or 4)
 		self.fps = int(settings["fps"] or 30)
-		self.iris = float(settings["iris"] or 0)
 		self.blur = float(settings["blur"] or 0)
 		self.threads = int(settings["threads"] or mp.cpu_count())
 
@@ -98,20 +97,20 @@ class Window:
 			# Request the camera to compute new pixels, then update each canvas rectangle element to display the new color data
 			# The 2D position of each pixel is stored as its index and implicitly known here
 			# The color burn effect is used to improve viewport performance by probabilistically skipping redraws of pixels who's color hasn't changes a lot
-			result = self.cam.pool(self.pool, range(0, self.width * self.height))
+			result = self.cam.pool(self.pool)
 			for i, c in enumerate(result):
 				if c and c != self.pixels[i]:
 					col = hex_to_rgb(c)
-					col_old = self.pixels[i]
-					threshold = self.iris * random.random()
-					if abs((col.r - col_old.r) / 255) > threshold or abs((col.g - col_old.g) / 255) > threshold or abs((col.b - col_old.b) / 255) > threshold:
-						col = col.mix(col_old, self.blur)
-						item = self.canvas_pixels[i]
-						self.canvas.itemconfig(item, fill = "#" + col.get_hex())
-						self.pixels[i] = col
+					col = col.mix(self.pixels[i], self.blur)
+					self.canvas.itemconfig(self.canvas_pixels[i], fill = "#" + col.get_hex())
+
+					# Adjust the weight of this pixel based on the color difference detected, use the smallest difference on any color channel
+					diff = min(abs(col.r - self.pixels[i].r), abs(col.g - self.pixels[i].g), abs(col.b - self.pixels[i].b)) / 255
+					self.cam.set_weight(i, diff)
+					self.pixels[i] = col
 
 			# Measure the time before and after the update to deduce practical FPS
-			info_text = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(int(1 / delay)) + " / " + str(self.fps) + " FPS"
+			info_text = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(int(1 + 1 / delay)) + " / " + str(self.fps) + " FPS"
 			self.canvas.itemconfig(self.canvas_info, text = info_text)
 
 		self.root.after(1, self.update)
@@ -149,18 +148,17 @@ objects.append(obj_environment)
 
 Window(objects,
 	width = 96,
-	height = 54,
+	height = 64,
 	scale = 8,
-	fps = 30,
+	fps = 24,
 	fov = 90,
 	dof = 1,
 	fog = 0.5,
-	skip = 0.75,
-	iris = 0.5,
-	blur = 0.25,
+	iris = 0.75,
+	blur = 0.5,
 	dist_min = 2,
-	dist_max = 48,
-	terminate_hits = 2,
+	dist_max = 192,
+	terminate_hits = 1,
 	terminate_dist = 0.5,
-	threads = 4,
+	threads = 0,
 )
