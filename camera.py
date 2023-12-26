@@ -2,7 +2,6 @@
 from lib import *
 
 import multiprocessing as mp
-import tkinter as tk
 import random
 
 import data

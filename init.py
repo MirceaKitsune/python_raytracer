@@ -3,7 +3,7 @@ from lib import *
 
 import multiprocessing as mp
 import time as t
-import tkinter as tk
+import pygame as pg
 
 import data
 import camera
@@ -22,98 +22,87 @@ class Window:
 		self.pool = mp.Pool(processes = self.threads)
 		self.cam = camera.Camera(objects, **settings)
 
-		# Configure TK and elements
-		self.root = tk.Tk()
-		self.root.title("Voxel Tracer")
-		self.root.geometry(str(self.width * self.scale) + "x" + str(self.height * self.scale))
-		# self.root.config(cursor="none")
-		# self.root.overrideredirect(True)
-		self.root.bind("<Escape>", exit)
-		self.root.bind("<KeyPress>", self.onKeyPress)
-		self.root.bind("<Motion>", self.onMouseMove)
-
-		self.canvas = tk.Canvas(self.root, width = self.width * self.scale, height = self.height * self.scale)
-		self.canvas.pack()
-
 		# Configure the pixel elements on the canvas at their default black color, use a pixel cache to remember pixel colors by index
 		# Index represents 2D positions, the range is ordered to represent all pixels read from left-to-right and up-to-down
-		self.pixels = []
-		self.canvas_pixels = []
-		for i in range(0, self.width * self.height):
-			pos = index_vec2(i, self.width)
-			pos_min = pos * self.scale
-			pos_max = pos_min + self.scale
-			canvas_rect = self.canvas.create_rectangle(pos_min.x, pos_min.y, pos_max.x, pos_max.y, fill = "#000000", width = 0)
-			self.canvas_pixels.append(canvas_rect)
-			self.pixels.append(rgb(0, 0, 0))
+		self.pixels = [rgb(0, 0, 0)] * (self.width * self.height)
 
-		# Configure info text
-		self.canvas_info = self.canvas.create_text(10, 10, font = ("Purisa", 8) , anchor = "nw", fill = "#ffffff")
+		# Configure and start Pygame
+		pg.init()
+		pg.display.set_caption("Voxel Tracer")
+		self.screen = pg.display.set_mode((self.width * self.scale, self.height * self.scale))
+		self.canvas = pg.Surface((self.width * self.scale, self.height * self.scale))
+		self.font = pg.font.SysFont(None, 24)
+		self.clock = pg.time.Clock()
+		self.running = True
 
-		# Start the main loop and update function, a timer is used to keep track of update rate
-		self.time = 0
-		self.root.after_idle(self.update)
-		self.root.mainloop()
+		# Start the main loop
+		while self.running:
+			for event in pg.event.get():
+				self.event(event)
+			self.update()
 
-	def onKeyPress(self, event):
-		# Movement keys
-		if event.keysym.lower() in "wasdrf":
+	def event(self, event):
+		if event.type == pg.QUIT:
+			self.running = False
+
+		if event.type == pg.KEYDOWN:
 			d = self.cam.rot.dir(False)
-			if event.keysym.lower() == "w":
+			deg = 90 / 16
+
+			# Quit key
+			if event.key == pg.K_ESCAPE:
+				self.running = False
+
+			# Movement keys
+			elif event.key == pg.K_w:
 				self.cam.pos += vec3(+d.x, +d.y, +d.z)
-			elif event.keysym.lower() == "s":
+			elif event.key == pg.K_s:
 				self.cam.pos += vec3(-d.x, -d.y, -d.z)
-			elif event.keysym.lower() == "a":
+			elif event.key == pg.K_a:
 				self.cam.pos += vec3(-d.z, 0, +d.x)
-			elif event.keysym.lower() == "d":
+			elif event.key == pg.K_d:
 				self.cam.pos += vec3(+d.z, 0, -d.x)
-			elif event.keysym.lower() == "r":
+			elif event.key == pg.K_r:
 				self.cam.pos += vec3(0, +1, 0)
-			elif event.keysym.lower() == "f":
+			elif event.key == pg.K_f:
 				self.cam.pos += vec3(0, -1, 0)
 
-		# Rotation keys
-		elif event.keysym.lower() in "up" + "down" + "left" + "right":
-			deg = 90 / 16
-			if event.keysym.lower() == "up" and (self.cam.rot.y < 90 or self.cam.rot.y >= 270):
+			# Rotation keys
+			elif event.key == pg.K_UP and (self.cam.rot.y < 90 or self.cam.rot.y >= 270):
 				self.cam.rot = self.cam.rot.rotate(vec3(0, +deg, 0))
-			elif event.keysym.lower() == "down" and (self.cam.rot.y <= 90 or self.cam.rot.y > 270):
+			elif event.key == pg.K_DOWN and (self.cam.rot.y <= 90 or self.cam.rot.y > 270):
 				self.cam.rot = self.cam.rot.rotate(vec3(0, -deg, 0))
-			elif event.keysym.lower() == "left":
+			elif event.key == pg.K_LEFT:
 				self.cam.rot = self.cam.rot.rotate(vec3(0, 0, -deg))
-			elif event.keysym.lower() == "right":
+			elif event.key == pg.K_RIGHT:
 				self.cam.rot = self.cam.rot.rotate(vec3(0, 0, +deg))
 
-	def onMouseMove(self, event):
-		pass
-
 	def update(self):
-		# Execute updates once the amount of time passed since the last update is greater than the desired FPS
-		time = t.time()
-		if self.time + (1 / self.fps) < time:
-			delay = time - self.time
-			self.time = time
+		# Request the camera to compute new pixels, then update each canvas rectangle element to display the new color data
+		# The 2D position of each pixel is stored as its index and implicitly known here
+		# The color burn effect is used to improve viewport performance by probabilistically skipping redraws of pixels who's color hasn't changes a lot
+		result = self.cam.pool(self.pool)
+		for i, c in enumerate(result):
+			if c and c != self.pixels[i]:
+				col = hex_to_rgb(c)
+				col = col.mix(self.pixels[i], self.blur)
+				pos = index_vec2(i, self.width)
+				self.canvas.fill((col.r, col.g, col.b), pg.Rect(pos.x * self.scale, pos.y * self.scale, self.scale, self.scale))
 
-			# Request the camera to compute new pixels, then update each canvas rectangle element to display the new color data
-			# The 2D position of each pixel is stored as its index and implicitly known here
-			# The color burn effect is used to improve viewport performance by probabilistically skipping redraws of pixels who's color hasn't changes a lot
-			result = self.cam.pool(self.pool)
-			for i, c in enumerate(result):
-				if c and c != self.pixels[i]:
-					col = hex_to_rgb(c)
-					col = col.mix(self.pixels[i], self.blur)
-					self.canvas.itemconfig(self.canvas_pixels[i], fill = "#" + col.get_hex())
+				# Adjust the weight of this pixel based on the color difference detected, use the smallest difference on any color channel
+				diff = min(abs(col.r - self.pixels[i].r), abs(col.g - self.pixels[i].g), abs(col.b - self.pixels[i].b)) / 255
+				self.cam.set_weight(i, diff)
+				self.pixels[i] = col
 
-					# Adjust the weight of this pixel based on the color difference detected, use the smallest difference on any color channel
-					diff = min(abs(col.r - self.pixels[i].r), abs(col.g - self.pixels[i].g), abs(col.b - self.pixels[i].b)) / 255
-					self.cam.set_weight(i, diff)
-					self.pixels[i] = col
+		# Draw the canvas and info text onto the screen
+		text_info = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(int(self.clock.get_fps())) + " / " + str(self.fps) + " FPS"
+		text = self.font.render(text_info, True, (255, 255, 255))
+		self.screen.blit(self.canvas, (0, 0))
+		self.screen.blit(text, (0, 0))
+		pg.display.update()
 
-			# Measure the time before and after the update to deduce practical FPS
-			info_text = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(int(1 + 1 / delay)) + " / " + str(self.fps) + " FPS"
-			self.canvas.itemconfig(self.canvas_info, text = info_text)
-
-		self.root.after(1, self.update)
+		# Wait for the next tick based on the desired FPS
+		self.clock.tick(self.fps)
 
 # Spawn test environment
 mat_red = data.Material(

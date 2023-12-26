@@ -1,6 +1,6 @@
 # Python Raytracer
 
-Experimental CPU based voxel raytracing engine written in Python, requires Tkinter. No meshes or textures: Everything is a floating point defined by a material. Materials can define their own functions as custom shaders. Designed for use at low resolutions and frame rates, the ray tracing algorithm is meant to be simple and efficient so expect noise and inaccuracy by design.
+Experimental CPU based voxel raytracing engine written in Python and based on Pygame. No meshes or textures: Everything is a floating point defined by a material. Materials can define their own functions as custom shaders. Designed for use at low resolutions and frame rates, the ray tracing algorithm is meant to be simple and efficient so expect noise and inaccuracy by design.
 
 ![alt text](cover.png)
 
@@ -11,7 +11,7 @@ To run just execute `python3 ./init.py` which will start the engine with the def
   - [x] Programmable material functions. Each voxel can hold both unique material properties as well as a function that tells light rays how to behave upon collision.
   - [ ] Finish all basic material properties: Reflection (done), refraction, metalicity, emission, subsurface scattering. Currently there is no lighting system.
   - [ ] Add a skybox system and support environment lighting. Currently everything not hit by a ray is a black void.
-  - [ ] Implement mouse movement to support mouse look. At the moment this isn't doable due to Tkinter being unable to snap the pointer to the center of the screen.
+  - [ ] Implement mouse movement to support mouse look.
   - [ ] Support cammera rolling if this becomes possible. Current vector math doesn't support a third axis of transformation, you can only look horizontally and vertically.
   - [ ] Add perlin noise. May be possible to support an object based chunk system for generating infinite terrain.
   - [ ] Create a script to convert image slices into pixel meshes. This will allow importing 3D sprites from 2D images.
