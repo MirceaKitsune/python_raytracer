@@ -27,6 +27,7 @@ The Window class in init.py is responsible for creating the window and its assoc
   - width: Number of horizontal pixels, higher values allow more detail but greatly affect performance.
   - height: Number of vertical pixels.
   - scale: The size of each pixel, acts as a multiplier to width and height.
+  - smooth: If false pixels are always sharp, if true use a bilinear filter when upscaling to the `scale` factor.
   - fps: Target number of frames per second, the end result may be lower or higher based on performance.
   - fov: Field of view in degrees, higher values make the viewport wider.
   - dof: Depth of field in degrees, higher values result in more randomness added to the initial ray velocity and distance blur.

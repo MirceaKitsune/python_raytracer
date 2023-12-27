@@ -41,6 +41,9 @@ class vec2:
 	def string(self):
 		return str(self.x) + "," + str(self.y)
 
+	def tuple(self):
+		return (self.x, self.y)
+
 	def int(self):
 		return vec2(int(self.x), int(self.y))
 
@@ -90,6 +93,9 @@ class vec3:
 
 	def string(self):
 		return str(self.x) + "," + str(self.y) + "," + str(self.z)
+
+	def tuple(self):
+		return (self.x, self.y, self.z)
 
 	def int(self):
 		return vec3(int(self.x), int(self.y), int(self.z))
@@ -158,8 +164,11 @@ class rgb:
 		bias2 = 1 - bias1
 		return rgb(int(self.r * bias2 + col.r * bias1), int(self.g * bias2 + col.g * bias1), int(self.b * bias2 + col.b * bias1))
 
-	def get_hex(self):
+	def hex(self):
 		return "%02x" % self.r + "%02x" % self.g + "%02x" % self.b
+
+	def tuple(self):
+		return (self.r, self.g, self.b)
 
 def hex_to_rgb(s: str):
 	return rgb(int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))

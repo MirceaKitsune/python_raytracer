@@ -26,7 +26,7 @@ class Camera:
 		self.weights = [1] * (self.width * self.height)
 
 	def set_weight(self, i: int, amount: float):
-		self.weights[i] = amount
+		self.weights[i] = (self.weights[i] + amount) / 2
 
 	def move(self, axis: int, amount: float):
 		self.pos += self.rot.dir(False) * amount
@@ -92,7 +92,7 @@ class Camera:
 				ray.alpha *= self.fog
 
 		# Once ray calculations are done, return the resulting color in hex format or black if no changes were made
-		return ray.col and ray.col.get_hex() or "000000"
+		return ray.col and ray.col.hex() or "000000"
 
 	def pool(self, pool):
 		return pool.map(self.trace, range(0, self.width * self.height))

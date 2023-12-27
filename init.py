@@ -14,6 +14,7 @@ class Window:
 		self.width = int(settings["width"] or 96)
 		self.height = int(settings["height"] or 54)
 		self.scale = int(settings["scale"] or 4)
+		self.smooth = int(settings["smooth"] or False)
 		self.fps = int(settings["fps"] or 30)
 		self.blur = float(settings["blur"] or 0)
 		self.threads = int(settings["threads"] or mp.cpu_count())
@@ -25,12 +26,14 @@ class Window:
 		# Configure the pixel elements on the canvas at their default black color, use a pixel cache to remember pixel colors by index
 		# Index represents 2D positions, the range is ordered to represent all pixels read from left-to-right and up-to-down
 		self.pixels = [rgb(0, 0, 0)] * (self.width * self.height)
+		self.rect = vec2(self.width, self.height)
+		self.rect_win = self.rect * self.scale
 
 		# Configure and start Pygame
 		pg.init()
 		pg.display.set_caption("Voxel Tracer")
-		self.screen = pg.display.set_mode((self.width * self.scale, self.height * self.scale))
-		self.canvas = pg.Surface((self.width * self.scale, self.height * self.scale))
+		self.screen = pg.display.set_mode(self.rect_win.tuple())
+		self.canvas = pg.Surface(self.rect.tuple())
 		self.font = pg.font.SysFont(None, 24)
 		self.clock = pg.time.Clock()
 		self.running = True
@@ -87,17 +90,18 @@ class Window:
 				col = hex_to_rgb(c)
 				col = col.mix(self.pixels[i], self.blur)
 				pos = index_vec2(i, self.width)
-				self.canvas.fill((col.r, col.g, col.b), pg.Rect(pos.x * self.scale, pos.y * self.scale, self.scale, self.scale))
+				self.canvas.set_at(pos.tuple(), col.tuple())
 
-				# Adjust the weight of this pixel based on the color difference detected, use the smallest difference on any color channel
-				diff = min(abs(col.r - self.pixels[i].r), abs(col.g - self.pixels[i].g), abs(col.b - self.pixels[i].b)) / 255
+				# Adjust the weight of this pixel based on the color difference, the weight is a 0 to 1 range representing changes in each channel (255 * 3 = 765)
+				diff = (abs(col.r - self.pixels[i].r) + abs(col.g - self.pixels[i].g) + abs(col.b - self.pixels[i].b)) / 765
 				self.cam.set_weight(i, diff)
 				self.pixels[i] = col
 
 		# Draw the canvas and info text onto the screen
+		canvas = self.smooth and pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) or pg.transform.scale(self.canvas, self.rect_win.tuple())
 		text_info = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(int(self.clock.get_fps())) + " / " + str(self.fps) + " FPS"
 		text = self.font.render(text_info, True, (255, 255, 255))
-		self.screen.blit(self.canvas, (0, 0))
+		self.screen.blit(canvas, (0, 0))
 		self.screen.blit(text, (0, 0))
 		pg.display.update()
 
@@ -139,11 +143,12 @@ Window(objects,
 	width = 96,
 	height = 64,
 	scale = 8,
+	smooth = False,
 	fps = 24,
 	fov = 90,
 	dof = 1,
 	fog = 0.5,
-	iris = 0.75,
+	iris = 0.5,
 	blur = 0.5,
 	dist_min = 2,
 	dist_max = 192,
