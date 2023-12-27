@@ -4,14 +4,20 @@ Experimental CPU based voxel raytracing engine written in Python and based on Py
 
 ![alt text](cover.png)
 
-To run just execute `python3 ./init.py` which will start the engine with the default test scene. Use the WASDRF keys to move forward, backward, left, right, up, down... use the arrow keys to change angle. The code is under the GPL license, created and developed by MirceaKitsune.
+The code is under the GPL license, created and developed by MirceaKitsune. Execute `python3 ./init.py` to start the engine with the default test scene. Use the mouse to look around with the following keys:
+
+ - WASDRF: Move forward, backward, left, right, up, down.
+ - Mouse wheel: Fast move forward, backward, left, right.
+ - Arrows: Look up, down, left, right.
+ - Tab: Toggle mouse look and pointer grabbing.
+ - Shift: Hold to move 5 times faster with the keyboard.
 
 ## Features and TODO
 
   - [x] Programmable material functions. Each voxel can hold both unique material properties as well as a function that tells light rays how to behave upon collision.
   - [ ] Finish all basic material properties: Reflection (done), refraction, metalicity, emission, subsurface scattering. Currently there is no lighting system.
   - [ ] Add a skybox system and support environment lighting. Currently everything not hit by a ray is a black void.
-  - [ ] Implement mouse movement to support mouse look.
+  - [ ] Support launching `init.py` with custom parameters to override the default settings.
   - [ ] Support cammera rolling if this becomes possible. Current vector math doesn't support a third axis of transformation, you can only look horizontally and vertically.
   - [ ] Add perlin noise. May be possible to support an object based chunk system for generating infinite terrain.
   - [ ] Create a script to convert image slices into pixel meshes. This will allow importing 3D sprites from 2D images.
@@ -24,6 +30,8 @@ To run just execute `python3 ./init.py` which will start the engine with the def
 
 The Window class in init.py is responsible for creating the window and its associated raytracer. When created it takes an array of objects that will be drawn, as well as a list of settings describing how the engine should behave. Settings include:
 
+  - speed_move: Keyboard movement speed, determines how fast the camera moves when using the movement keys.
+  - speed_mouse: Mouse rotation speed, determines how fast the camera rotates when moving the mouse in mouselook mode.
   - width: Number of horizontal pixels, higher values allow more detail but greatly affect performance.
   - height: Number of vertical pixels.
   - scale: The size of each pixel, acts as a multiplier to width and height.

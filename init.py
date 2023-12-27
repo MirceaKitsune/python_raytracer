@@ -11,6 +11,8 @@ import camera
 class Window:
 	def __init__(self, objects: list, **settings):
 		# Store relevant settings
+		self.speed_move = float(settings["speed_move"] or 10)
+		self.speed_mouse = float(settings["speed_mouse"] or 10)
 		self.width = int(settings["width"] or 96)
 		self.height = int(settings["height"] or 54)
 		self.scale = int(settings["scale"] or 4)
@@ -18,6 +20,7 @@ class Window:
 		self.fps = int(settings["fps"] or 30)
 		self.blur = float(settings["blur"] or 0)
 		self.threads = int(settings["threads"] or mp.cpu_count())
+		self.mouselook = True
 
 		# Setup the camera and thread pool that will be used to update this window
 		self.pool = mp.Pool(processes = self.threads)
@@ -40,45 +43,65 @@ class Window:
 
 		# Start the main loop
 		while self.running:
-			for event in pg.event.get():
-				self.event(event)
-			self.update()
+			self.input()
+			if pg.mouse.get_focused():
+				self.update()
+			self.clock.tick(self.fps)
 
-	def event(self, event):
-		if event.type == pg.QUIT:
-			self.running = False
+	def input(self):
+		pg.mouse.set_visible(not self.mouselook)
+		keys = pg.key.get_pressed()
+		mods = pg.key.get_mods()
+		d = self.cam.rot.dir(False)
+		units = self.clock.get_time() / 1000 * self.speed_move
+		units_mouse = self.speed_mouse / 1000
 
-		if event.type == pg.KEYDOWN:
-			d = self.cam.rot.dir(False)
-			deg = 90 / 16
+		# Mods: Acceleration
+		if mods & pg.KMOD_SHIFT:
+			units *= 5
 
-			# Quit key
-			if event.key == pg.K_ESCAPE:
+		# One time events: Quit, request quit or toggle mouselook, mouse wheel movement, mouse motion
+		for e in pg.event.get():
+			if e.type == pg.QUIT:
 				self.running = False
+				return
+			if e.type == pg.KEYDOWN:
+				if e.key == pg.K_ESCAPE:
+					self.running = False
+				if e.key == pg.K_TAB:
+					self.mouselook = not self.mouselook
+			if e.type == pg.MOUSEWHEEL:
+				self.cam.pos += vec3(+d.z, 0, -d.x) * e.x * 5
+				self.cam.pos += vec3(+d.x, +d.y, +d.z) * e.y * 5
+			if e.type == pg.MOUSEMOTION and self.mouselook:
+				center = self.rect_win / 2
+				x, y = pg.mouse.get_pos()
+				ofs = vec2(center.x - x, center.y - y)
+				rot = vec3(0, +ofs.y, -ofs.x)
+				self.cam.rot = self.cam.rot.rotate(rot * units_mouse)
+				pg.mouse.set_pos((center.x, center.y))
 
-			# Movement keys
-			elif event.key == pg.K_w:
-				self.cam.pos += vec3(+d.x, +d.y, +d.z)
-			elif event.key == pg.K_s:
-				self.cam.pos += vec3(-d.x, -d.y, -d.z)
-			elif event.key == pg.K_a:
-				self.cam.pos += vec3(-d.z, 0, +d.x)
-			elif event.key == pg.K_d:
-				self.cam.pos += vec3(+d.z, 0, -d.x)
-			elif event.key == pg.K_r:
-				self.cam.pos += vec3(0, +1, 0)
-			elif event.key == pg.K_f:
-				self.cam.pos += vec3(0, -1, 0)
-
-			# Rotation keys
-			elif event.key == pg.K_UP and (self.cam.rot.y < 90 or self.cam.rot.y >= 270):
-				self.cam.rot = self.cam.rot.rotate(vec3(0, +deg, 0))
-			elif event.key == pg.K_DOWN and (self.cam.rot.y <= 90 or self.cam.rot.y > 270):
-				self.cam.rot = self.cam.rot.rotate(vec3(0, -deg, 0))
-			elif event.key == pg.K_LEFT:
-				self.cam.rot = self.cam.rot.rotate(vec3(0, 0, -deg))
-			elif event.key == pg.K_RIGHT:
-				self.cam.rot = self.cam.rot.rotate(vec3(0, 0, +deg))
+		# Ongoing events: Camera movement, camera rotation
+		if keys[pg.K_w]:
+			self.cam.pos += vec3(+d.x, +d.y, +d.z) * units
+		if keys[pg.K_s]:
+			self.cam.pos += vec3(-d.x, -d.y, -d.z) * units
+		if keys[pg.K_a]:
+			self.cam.pos += vec3(-d.z, 0, +d.x) * units
+		if keys[pg.K_d]:
+			self.cam.pos += vec3(+d.z, 0, -d.x) * units
+		if keys[pg.K_r]:
+			self.cam.pos += vec3(0, +1, 0) * units
+		if keys[pg.K_f]:
+			self.cam.pos += vec3(0, -1, 0) * units
+		if keys[pg.K_UP]:
+			self.cam.rot = self.cam.rot.rotate(vec3(0, +5, 0) * units)
+		if keys[pg.K_DOWN]:
+			self.cam.rot = self.cam.rot.rotate(vec3(0, -5, 0) * units)
+		if keys[pg.K_LEFT]:
+			self.cam.rot = self.cam.rot.rotate(vec3(0, 0, -5) * units)
+		if keys[pg.K_RIGHT]:
+			self.cam.rot = self.cam.rot.rotate(vec3(0, 0, +5) * units)
 
 	def update(self):
 		# Request the camera to compute new pixels, then update each canvas rectangle element to display the new color data
@@ -104,9 +127,6 @@ class Window:
 		self.screen.blit(canvas, (0, 0))
 		self.screen.blit(text, (0, 0))
 		pg.display.update()
-
-		# Wait for the next tick based on the desired FPS
-		self.clock.tick(self.fps)
 
 # Spawn test environment
 mat_red = data.Material(
@@ -140,6 +160,8 @@ objects = []
 objects.append(obj_environment)
 
 Window(objects,
+	speed_move = 10,
+	speed_mouse = 10,
 	width = 96,
 	height = 64,
 	scale = 8,
