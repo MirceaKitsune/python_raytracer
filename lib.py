@@ -1,6 +1,18 @@
 #!/usr/bin/python3
+import sys
 import math
 import random
+import configparser
+
+# Load a config and allow fetching a specific section, the default config is loaded implicitly
+class config:
+	def __init__(self, file: str):
+		self.cfg = configparser.RawConfigParser()
+		self.cfg.read(file)
+	def item(self, name: str):
+		return dict(self.cfg.items(name))
+
+cfg = config(len(sys.argv) > 1 and sys.argv[1] or "config.cfg")
 
 # Store: Generic data storage, similar to the Python dictionary but allows getting and setting properties with dots (eg: data.prop instead of data["prop"])
 class store:

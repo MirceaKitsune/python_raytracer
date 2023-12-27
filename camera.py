@@ -7,18 +7,22 @@ import random
 import data
 
 class Camera:
-	def __init__(self, objects: list, **settings):
-		# Store relevant settings
-		self.width = int(settings["width"] or 120)
-		self.height = int(settings["height"] or 60)
-		self.fov = float(settings["fov"] or 90)
-		self.dof = float(settings["dof"] or 0)
-		self.fog = float(settings["fog"] or 0)
-		self.iris = float(settings["iris"] or 0)
-		self.dist_min = int(settings["dist_min"] or 0)
-		self.dist_max = int(settings["dist_max"] or 24)
-		self.terminate_hits = float(settings["terminate_hits"] or 0)
-		self.terminate_dist = float(settings["terminate_dist"] or 0)
+	def __init__(self, objects):
+		# Read relevant settings
+		cfg_input = cfg.item("INPUT")
+		cfg_window = cfg.item("WINDOW")
+		cfg_render = cfg.item("RENDER")
+		self.max_pitch = float(cfg_input["max_pitch"]) or 0
+		self.width = int(cfg_window["width"]) or 120
+		self.height = int(cfg_window["height"]) or 60
+		self.fov = float(cfg_render["fov"]) or 90
+		self.dof = float(cfg_render["dof"]) or 0
+		self.fog = float(cfg_render["fog"]) or 0
+		self.iris = float(cfg_render["iris"]) or 0
+		self.dist_min = int(cfg_render["dist_min"]) or 0
+		self.dist_max = int(cfg_render["dist_max"]) or 24
+		self.terminate_hits = float(cfg_render["terminate_hits"]) or 0
+		self.terminate_dist = float(cfg_render["terminate_dist"]) or 0
 		self.objects = objects
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
@@ -28,11 +32,22 @@ class Camera:
 	def set_weight(self, i: int, amount: float):
 		self.weights[i] = (self.weights[i] + amount) / 2
 
-	def move(self, axis: int, amount: float):
-		self.pos += self.rot.dir(False) * amount
+	def move(self, ofs: vec3):
+		if ofs.x != 0 or ofs.y != 0 or ofs.z != 0:
+			self.pos += ofs
 
 	def rotate(self, rot: vec3):
-		self.rot = self.rot.rotate(rot)
+		if rot.x != 0 or rot.y != 0 or rot.z != 0:
+			self.rot = self.rot.rotate(rot)
+
+			# Limit camera pitch
+			if self.max_pitch:
+				pitch_min = max(180, 360 - self.max_pitch)
+				pitch_max = min(180, self.max_pitch)
+				if self.rot.y > pitch_max and self.rot.y <= 180:
+					self.rot.y = pitch_max
+				if self.rot.y < pitch_min and self.rot.y > 180:
+					self.rot.y = pitch_min
 
 	def trace(self, i):
 		# Probabilistically skip pixel recalculation based on weight

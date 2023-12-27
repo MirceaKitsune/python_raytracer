@@ -17,7 +17,6 @@ The code is under the GPL license, created and developed by MirceaKitsune. Execu
   - [x] Programmable material functions. Each voxel can hold both unique material properties as well as a function that tells light rays how to behave upon collision.
   - [ ] Finish all basic material properties: Reflection (done), refraction, metalicity, emission, subsurface scattering. Currently there is no lighting system.
   - [ ] Add a skybox system and support environment lighting. Currently everything not hit by a ray is a black void.
-  - [ ] Support launching `init.py` with custom parameters to override the default settings.
   - [ ] Support cammera rolling if this becomes possible. Current vector math doesn't support a third axis of transformation, you can only look horizontally and vertically.
   - [ ] Add perlin noise. May be possible to support an object based chunk system for generating infinite terrain.
   - [ ] Create a script to convert image slices into pixel meshes. This will allow importing 3D sprites from 2D images.
@@ -28,25 +27,29 @@ The code is under the GPL license, created and developed by MirceaKitsune. Execu
 
 ## Camera settings
 
-The Window class in init.py is responsible for creating the window and its associated raytracer. When created it takes an array of objects that will be drawn, as well as a list of settings describing how the engine should behave. Settings include:
+Settings are stored within the `config.cfg` file and can be used to modify how the engine behaves. A custom config can be used by parsing it as an argument to the main script on launch, eg: `init.py my_config.cfg`. Below is a description of each category and setting:
 
-  - speed_move: Keyboard movement speed, determines how fast the camera moves when using the movement keys.
-  - speed_mouse: Mouse rotation speed, determines how fast the camera rotates when moving the mouse in mouselook mode.
-  - width: Number of horizontal pixels, higher values allow more detail but greatly affect performance.
-  - height: Number of vertical pixels.
-  - scale: The size of each pixel, acts as a multiplier to width and height.
-  - smooth: If false pixels are always sharp, if true use a bilinear filter when upscaling to the `scale` factor.
-  - fps: Target number of frames per second, the end result may be lower or higher based on performance.
-  - fov: Field of view in degrees, higher values make the viewport wider.
-  - dof: Depth of field in degrees, higher values result in more randomness added to the initial ray velocity and distance blur.
-  - fog: Amount by which distant rays will gradually fade before vanishing. Not to be confused with real volumetric fog, this only affects the alpha value used to indicate ray blending to material functions. 0 disables fog fading, higher values push the effect further while making it sharper.
-  - iris: Retinal burn or iris adaptation effect. Improves performance by allowing a probabilistic threshold for pixels to be updated, based on changes in color level during the previous frame which gives priority to noisy pixels. 0 disables and updates all colors immediately, higher values prioritize noticeable differences and delay minor ones, 1 can cause updates to stop permanently so always use a lower value.
-  - blur: Simulates motion blur and DOF edge smoothing, also acts as a cheaper alternative to multisampling. Each frame the previous color of the pixel is gradually blended with the new color by this amount. 0 disables and will look very rough, higher values reduce noise and make viewport updates smoother. No performance benefit but looks better.
-  - dist_min: Minimum ray distance, voxels won't be checked until the ray has preformed this number of steps.
-  - dist_max: Maximum ray distance, calculation stops and ray color is returned after this number of steps have been preformed.
-  - terminate_hits: Random chance that sampling stops after this number of hits. 0 disables bounces and allows direct hits only, 0.5 has a 50/50 chance of stopping at any step after the first bounce, 1 guarantees at least one bounce with no stopping, 1.5 adds a 50/50 chance of the second bounce not being stopped, 2 allows two bounces with no stopping, etc. Higher values improve performance at the cost of shorter distances and more blur for reflections.
-  - terminate_dist: Probability that sampling stops earlier the further a ray has traveled. 0 disables and lets all rays run at their full lifetime, 0.5 allows probabilistic termination to occur from halfway through a ray's life, 1 may terminate all rays but those just spawned in front of the camera. Improves performance but introduces noise in the distance.
-  - threads: The number of threads to use for ray tracing by the thread pool, 0 will use all CPU cores.
+  - INPUT: Input related settings for keyboard and mouse.
+    - speed_move: Keyboard movement speed, determines how fast the camera moves when using the movement keys.
+    - speed_mouse: Mouse rotation speed, determines how fast the camera rotates when moving the mouse in mouselook mode.
+    - max_pitch: Maximum pitch angle in degrees, the camera can't look lower or higher than this amount. 0 disables, use a value below 180, 90 is recommended.
+  - WINDOW: Window related settings such as resolution and frame rate.
+    - width: Number of horizontal pixels, higher values allow more detail but greatly affect performance.
+    - height: Number of vertical pixels.
+    - scale: The size of each pixel, acts as a multiplier to width and height.
+    - smooth: If false pixels are always sharp, if true use a bilinear filter when upscaling to the `scale` factor.
+    - fps: Target number of frames per second, the end result may be lower or higher based on practical performance. FPS will be lowered when the window is not focused.
+  - RENDER: Renderer related settings used by the camera.
+    - fov: Field of view in degrees, higher values make the viewport wider.
+    - dof: Depth of field in degrees, higher values result in more randomness added to the initial ray velocity and distance blur.
+    - fog: Amount by which distant rays will gradually fade before vanishing. Not to be confused with real volumetric fog, this only affects the alpha value used to indicate ray blending to material functions. 0 disables fog fading, higher values push the effect further while making it sharper.
+    - iris: Retinal burn or iris adaptation effect. Improves performance by allowing a probabilistic threshold for pixels to be updated, based on changes in color level during the previous frame which gives priority to noisy pixels. 0 disables and updates all colors immediately, higher values prioritize noticeable differences and delay minor ones, 1 can cause updates to stop permanently so always use a lower value.
+    - blur: Simulates motion blur and DOF edge smoothing, also acts as a cheaper alternative to multisampling. Each frame the previous color of the pixel is gradually blended with the new color by this amount. 0 disables and will look very rough, higher values reduce noise and make viewport updates smoother. No performance benefit but looks better.
+    - dist_min: Minimum ray distance, voxels won't be checked until the ray has preformed this number of steps.
+    - dist_max: Maximum ray distance, calculation stops and ray color is returned after this number of steps have been preformed.
+    - terminate_hits: Random chance that sampling stops after this number of hits. 0 disables bounces and allows direct hits only, 0.5 has a 50/50 chance of stopping at any step after the first bounce, 1 guarantees at least one bounce with no stopping, 1.5 adds a 50/50 chance of the second bounce not being stopped, 2 allows two bounces with no stopping, etc. Higher values improve performance at the cost of shorter distances and more blur for reflections.
+    - terminate_dist: Probability that sampling stops earlier the further a ray has traveled. 0 disables and lets all rays run at their full lifetime, 0.5 allows probabilistic termination to occur from halfway through a ray's life, 1 may terminate all rays but those just spawned in front of the camera. Improves performance but introduces noise in the distance.
+    - threads: The number of threads to use for ray tracing by the thread pool, 0 will use all CPU cores.
 
 The object list is the first property that must be passed to the Window class. Object arguments include:
 

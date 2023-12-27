@@ -9,22 +9,25 @@ import data
 import camera
 
 class Window:
-	def __init__(self, objects: list, **settings):
-		# Store relevant settings
-		self.speed_move = float(settings["speed_move"] or 10)
-		self.speed_mouse = float(settings["speed_mouse"] or 10)
-		self.width = int(settings["width"] or 96)
-		self.height = int(settings["height"] or 54)
-		self.scale = int(settings["scale"] or 4)
-		self.smooth = int(settings["smooth"] or False)
-		self.fps = int(settings["fps"] or 30)
-		self.blur = float(settings["blur"] or 0)
-		self.threads = int(settings["threads"] or mp.cpu_count())
+	def __init__(self, objects):
+		# Read relevant settings
+		cfg_input = cfg.item("INPUT")
+		cfg_window = cfg.item("WINDOW")
+		cfg_render = cfg.item("RENDER")
+		self.speed_move = float(cfg_input["speed_move"]) or 10
+		self.speed_mouse = float(cfg_input["speed_mouse"]) or 10
+		self.width = int(cfg_window["width"]) or 96
+		self.height = int(cfg_window["height"]) or 54
+		self.scale = int(cfg_window["scale"]) or 4
+		self.smooth = int(cfg_window["smooth"]) or 0
+		self.fps = int(cfg_window["fps"]) or 30
+		self.blur = float(cfg_render["blur"]) or 0
+		self.threads = int(cfg_render["threads"]) or mp.cpu_count()
 		self.mouselook = True
 
 		# Setup the camera and thread pool that will be used to update this window
 		self.pool = mp.Pool(processes = self.threads)
-		self.cam = camera.Camera(objects, **settings)
+		self.cam = camera.Camera(objects)
 
 		# Configure the pixel elements on the canvas at their default black color, use a pixel cache to remember pixel colors by index
 		# Index represents 2D positions, the range is ordered to represent all pixels read from left-to-right and up-to-down
@@ -44,9 +47,11 @@ class Window:
 		# Start the main loop
 		while self.running:
 			self.input()
-			if pg.mouse.get_focused():
-				self.update()
-			self.clock.tick(self.fps)
+			self.update()
+
+			# Enforce the FPS limit, use a slower clock when the window is not focused
+			fps = pg.mouse.get_focused() and self.fps or int(self.fps / 5)
+			self.clock.tick(fps)
 
 	def input(self):
 		pg.mouse.set_visible(not self.mouselook)
@@ -71,37 +76,37 @@ class Window:
 				if e.key == pg.K_TAB:
 					self.mouselook = not self.mouselook
 			if e.type == pg.MOUSEWHEEL:
-				self.cam.pos += vec3(+d.z, 0, -d.x) * e.x * 5
-				self.cam.pos += vec3(+d.x, +d.y, +d.z) * e.y * 5
+				self.cam.move(vec3(+d.z, 0, -d.x) * e.x * 5)
+				self.cam.move(vec3(+d.x, +d.y, +d.z) * e.y * 5)
 			if e.type == pg.MOUSEMOTION and self.mouselook:
 				center = self.rect_win / 2
 				x, y = pg.mouse.get_pos()
 				ofs = vec2(center.x - x, center.y - y)
 				rot = vec3(0, +ofs.y, -ofs.x)
-				self.cam.rot = self.cam.rot.rotate(rot * units_mouse)
+				self.cam.rotate(rot * units_mouse)
 				pg.mouse.set_pos((center.x, center.y))
 
 		# Ongoing events: Camera movement, camera rotation
 		if keys[pg.K_w]:
-			self.cam.pos += vec3(+d.x, +d.y, +d.z) * units
+			self.cam.move(vec3(+d.x, +d.y, +d.z) * units)
 		if keys[pg.K_s]:
-			self.cam.pos += vec3(-d.x, -d.y, -d.z) * units
+			self.cam.move(vec3(-d.x, -d.y, -d.z) * units)
 		if keys[pg.K_a]:
-			self.cam.pos += vec3(-d.z, 0, +d.x) * units
+			self.cam.move(vec3(-d.z, 0, +d.x) * units)
 		if keys[pg.K_d]:
-			self.cam.pos += vec3(+d.z, 0, -d.x) * units
+			self.cam.move(vec3(+d.z, 0, -d.x) * units)
 		if keys[pg.K_r]:
-			self.cam.pos += vec3(0, +1, 0) * units
+			self.cam.move(vec3(0, +1, 0) * units)
 		if keys[pg.K_f]:
-			self.cam.pos += vec3(0, -1, 0) * units
+			self.cam.move(vec3(0, -1, 0) * units)
 		if keys[pg.K_UP]:
-			self.cam.rot = self.cam.rot.rotate(vec3(0, +5, 0) * units)
+			self.cam.rotate(vec3(0, +5, 0) * units)
 		if keys[pg.K_DOWN]:
-			self.cam.rot = self.cam.rot.rotate(vec3(0, -5, 0) * units)
+			self.cam.rotate(vec3(0, -5, 0) * units)
 		if keys[pg.K_LEFT]:
-			self.cam.rot = self.cam.rot.rotate(vec3(0, 0, -5) * units)
+			self.cam.rotate(vec3(0, 0, -5) * units)
 		if keys[pg.K_RIGHT]:
-			self.cam.rot = self.cam.rot.rotate(vec3(0, 0, +5) * units)
+			self.cam.rotate(vec3(0, 0, +5) * units)
 
 	def update(self):
 		# Request the camera to compute new pixels, then update each canvas rectangle element to display the new color data
@@ -159,22 +164,4 @@ obj_environment.set_voxel_area(vec3(0, 15, 0), vec3(15, 15, 15), mat_blue)
 objects = []
 objects.append(obj_environment)
 
-Window(objects,
-	speed_move = 10,
-	speed_mouse = 10,
-	width = 96,
-	height = 64,
-	scale = 8,
-	smooth = False,
-	fps = 24,
-	fov = 90,
-	dof = 1,
-	fog = 0.5,
-	iris = 0.5,
-	blur = 0.5,
-	dist_min = 2,
-	dist_max = 192,
-	terminate_hits = 1,
-	terminate_dist = 0.5,
-	threads = 0,
-)
+Window(objects)
