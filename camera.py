@@ -2,6 +2,8 @@
 from lib import *
 
 import multiprocessing as mp
+import pygame as pg
+import math
 import random
 
 import data
@@ -18,11 +20,13 @@ class Camera:
 		self.fov = float(cfg_render["fov"]) or 90
 		self.dof = float(cfg_render["dof"]) or 0
 		self.fog = float(cfg_render["fog"]) or 0
-		self.iris = float(cfg_render["iris"]) or 0
+		self.skip = float(cfg_render["skip"]) or 0
+		self.blur = float(cfg_render["blur"]) or 0
 		self.dist_min = int(cfg_render["dist_min"]) or 0
 		self.dist_max = int(cfg_render["dist_max"]) or 24
 		self.terminate_hits = float(cfg_render["terminate_hits"]) or 0
 		self.terminate_dist = float(cfg_render["terminate_dist"]) or 0
+		self.lines = int(cfg_render["lines"]) or self.height
 		self.objects = objects
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
@@ -49,15 +53,15 @@ class Camera:
 				if self.rot.y < pitch_min and self.rot.y > 180:
 					self.rot.y = pitch_min
 
-	def trace(self, i):
-		# Probabilistically skip pixel recalculation based on weight
-		if (1 - self.weights[i]) * self.iris > random.random():
-			return None
-
+	def draw_trace(self, i):
 		# Obtain the 2D position of this pixel in the viewport as: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
 		pos = index_vec2(i, self.width)
 		ofs_x = (-0.5 + pos.x / self.width) * 2
 		ofs_y = (-0.5 + pos.y / self.height) * 2
+
+		# Probabilistically skip pixel recalculation for pixels closer to the screen edge
+		if max(abs(ofs_x), abs(ofs_y)) * self.skip > random.random():
+			return None
 
 		# Pixel position is converted to a ray velocity based on the lens distorsion defined by FOV and randomly offset by DOF
 		lens_fov = (self.fov + rand(self.dof)) * math.pi / 8
@@ -93,10 +97,10 @@ class Camera:
 			pos_int = ray.pos.int()
 			for obj in self.objects:
 				if obj.active and obj.intersects(pos_int):
-					pos = obj.pos_rel(pos_int)
-					mat = obj.get_voxel(pos)
-					if mat:
-						mat.function(ray, mat)
+					obj_pos = obj.pos_rel(pos_int)
+					obj_mat = obj.get_voxel(obj_pos)
+					if obj_mat:
+						obj_mat.function(ray, obj_mat)
 
 			# Terminate this ray earlier in some circumstances to improve performance
 			if ray.hits > 0 and self.terminate_hits / ray.hits < random.random():
@@ -107,7 +111,27 @@ class Camera:
 				ray.alpha *= self.fog
 
 		# Once ray calculations are done, return the resulting color in hex format or black if no changes were made
-		return ray.col and ray.col.hex() or "000000"
+		return ray.col or rgb(0, 0, 0)
+
+	def draw(self, line):
+		# Create a new surface for this thread to paint to, returned to the main thread as a byte string
+		# The alpha channel is used for the blur effect by reducing how much the new image is added to the old canvas
+		srf = pg.Surface((self.width, self.lines), pg.SRCALPHA)
+
+		# Trace every pixel on this surface, the 2D position of each pixel is deduced from its index
+		# i is the pixel index relative to the local surface, index is the pixel index at its real position in the window
+		for i in range(0, self.lines * self.width):
+			index = (line * self.lines * self.width) + i
+			if index >= self.width * self.height:
+				break
+
+			col = self.draw_trace(index)
+			if col:
+				alpha = int(self.blur * 255)
+				srf_pos = index_vec2(i, self.width)
+				srf.set_at(srf_pos.tuple(), col.tuple() + (alpha,))
+
+		return pg.image.tobytes(srf, "RGBA")
 
 	def pool(self, pool):
-		return pool.map(self.trace, range(0, self.width * self.height))
+		return pool.map(self.draw, range(0, math.ceil(self.height / self.lines)))

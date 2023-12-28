@@ -21,17 +21,13 @@ class Window:
 		self.scale = int(cfg_window["scale"]) or 4
 		self.smooth = int(cfg_window["smooth"]) or 0
 		self.fps = int(cfg_window["fps"]) or 30
-		self.blur = float(cfg_render["blur"]) or 0
 		self.threads = int(cfg_render["threads"]) or mp.cpu_count()
+		self.lines = int(cfg_render["lines"]) or self.height
 		self.mouselook = True
 
 		# Setup the camera and thread pool that will be used to update this window
 		self.pool = mp.Pool(processes = self.threads)
 		self.cam = camera.Camera(objects)
-
-		# Configure the pixel elements on the canvas at their default black color, use a pixel cache to remember pixel colors by index
-		# Index represents 2D positions, the range is ordered to represent all pixels read from left-to-right and up-to-down
-		self.pixels = [rgb(0, 0, 0)] * (self.width * self.height)
 		self.rect = vec2(self.width, self.height)
 		self.rect_win = self.rect * self.scale
 
@@ -109,21 +105,11 @@ class Window:
 			self.cam.rotate(vec3(0, 0, +5) * units)
 
 	def update(self):
-		# Request the camera to compute new pixels, then update each canvas rectangle element to display the new color data
-		# The 2D position of each pixel is stored as its index and implicitly known here
-		# The color burn effect is used to improve viewport performance by probabilistically skipping redraws of pixels who's color hasn't changes a lot
+		# Request the camera to draw new tiles, add the image of each tile to the canvas at its correct position once all segments have been received
 		result = self.cam.pool(self.pool)
-		for i, c in enumerate(result):
-			if c and c != self.pixels[i]:
-				col = hex_to_rgb(c)
-				col = col.mix(self.pixels[i], self.blur)
-				pos = index_vec2(i, self.width)
-				self.canvas.set_at(pos.tuple(), col.tuple())
-
-				# Adjust the weight of this pixel based on the color difference, the weight is a 0 to 1 range representing changes in each channel (255 * 3 = 765)
-				diff = (abs(col.r - self.pixels[i].r) + abs(col.g - self.pixels[i].g) + abs(col.b - self.pixels[i].b)) / 765
-				self.cam.set_weight(i, diff)
-				self.pixels[i] = col
+		for i, s in enumerate(result):
+			srf = pg.image.frombytes(s, (self.width, self.lines), "RGBA")
+			self.canvas.blit(srf, (0, i * self.lines))
 
 		# Draw the canvas and info text onto the screen
 		canvas = self.smooth and pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) or pg.transform.scale(self.canvas, self.rect_win.tuple())
