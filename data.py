@@ -52,25 +52,22 @@ class Object:
 		z = max(0, abs(self.pos.z - pos.z) - self.dist.z)
 		return max(x, y, z)
 
-	# Check whether a point position is inside the bounding box of this object
-	def intersects(self, pos: vec3):
-		if pos.x < self.maxs.x + 1 and pos.x > self.mins.x:
-			if pos.y < self.maxs.y + 1 and pos.y > self.mins.y:
-				if pos.z < self.maxs.z + 1 and pos.z > self.mins.z:
-					return True
-		return False
-
-	# Check whether another box intersects the bounding box of this object, pos_min and pos_max represent the corners of the other box
-	def intersects_box(self, pos_min: vec3, pos_max: vec3):
+	# Check whether another item intersects the bounding box of this object, pos_min and pos_max represent the corners of another box or a point if identical
+	def intersects(self, pos_min: vec3, pos_max: vec3):
 		if pos_min.x < self.maxs.x + 1 and pos_max.x > self.mins.x:
 			if pos_min.y < self.maxs.y + 1 and pos_max.y > self.mins.y:
 				if pos_min.z < self.maxs.z + 1 and pos_max.z > self.mins.z:
 					return True
 		return False
 
-	# Returns position relative to the minimum corner, add range 0 to self.size to get a particular voxel
+	# Returns position relative to the minimum corner, None if the position is outside of object boundaries
 	def pos_rel(self, pos: vec3):
-		return self.maxs - pos
+		pos_rel = self.maxs - pos
+		if pos_rel.x >= 0 and pos_rel.x < self.size.x:
+			if pos_rel.y >= 0 and pos_rel.y < self.size.y:
+				if pos_rel.z >= 0 and pos_rel.z < self.size.z:
+					return pos_rel
+		return None
 
 	# Moves this object to a new origin, update mins and maxs to represent the bounding box in space
 	def move(self, pos):

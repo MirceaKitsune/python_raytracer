@@ -9,7 +9,7 @@ import random
 import data
 
 class Camera:
-	def __init__(self):
+	def __init__(self, bg: callable):
 		# Read relevant settings
 		cfg_input = cfg.item("INPUT")
 		cfg_window = cfg.item("WINDOW")
@@ -19,7 +19,6 @@ class Camera:
 		self.height = int(cfg_window["height"]) or 60
 		self.fov = float(cfg_render["fov"]) or 90
 		self.dof = float(cfg_render["dof"]) or 0
-		self.fog = float(cfg_render["fog"]) or 0
 		self.skip = float(cfg_render["skip"]) or 0
 		self.blur = float(cfg_render["blur"]) or 0
 		self.dist_min = int(cfg_render["dist_min"]) or 0
@@ -30,6 +29,7 @@ class Camera:
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
 		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
+		self.bg = bg
 		self.objects = []
 
 	def move(self, ofs: vec3):
@@ -74,7 +74,6 @@ class Camera:
 		# Ray data is kept in a data store so it can be easily delivered to material functions and support custom properties
 		ray = store(
 			col = None,
-			alpha = 1,
 			pos = self.pos + ray_dir * self.dist_min,
 			vel = ray_dir,
 			step = 0,
@@ -88,8 +87,8 @@ class Camera:
 		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
 		while ray.step < ray.life:
 			for obj in self.objects:
-				if obj.intersects(ray.pos):
-					obj_pos = obj.pos_rel(ray.pos)
+				obj_pos = obj.pos_rel(ray.pos)
+				if obj_pos:
 					obj_mat = obj.get_voxel(obj_pos)
 					if obj_mat:
 						obj_mat.function(ray, obj_mat)
@@ -99,13 +98,12 @@ class Camera:
 				break
 			elif ray.step / ray.life > 1 - self.terminate_dist * random.random():
 				break
-			elif ray.step / ray.life > 1 - self.fog:
-				ray.alpha *= self.fog
 			ray.step += 1
 			ray.pos += ray.vel
 
-		# Once ray calculations are done, return the resulting color or black if no changes were made
-		return ray.col or rgb(0, 0, 0)
+		# Once ray calculations are done, run the background function and return the resulting color
+		self.bg(ray)
+		return ray.col
 
 	def draw(self, thread):
 		# Create a new surface for this thread to paint to, returned to the main thread as a byte string

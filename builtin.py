@@ -3,9 +3,10 @@ from lib import *
 
 import data
 
+# Default material function, designed as a simplified PBR shader
 def material(ray, mat):
-	# Color: Use material color darkened by alpha value, mixing reduces with the number of hits as bounces lose energy
-	col = mat.albedo.mix(rgb(0, 0, 0), 1 - ray.alpha)
+	# Color: Apply the material color, mixing reduces with the number of hits as bounces lose energy
+	col = mat.albedo
 	col_mix = 1 / (1 + ray.hits)
 	ray.col = ray.col and ray.col.mix(col, col_mix) or col
 
@@ -32,10 +33,14 @@ def material(ray, mat):
 	# Hits: Increase the number of hits based on material translucency
 	ray.hits += 1 - mat.translucency
 
-	return True
+# Default background function, generates a simple sky
+def material_sky(ray):
+	col = rgb(127, 127 + max(0, +ray.vel.y) * 64, 127 + max(0, +ray.vel.y) * 128)
+	col_mix = 1 / (1 + ray.hits)
+	ray.col = ray.col and ray.col.mix(col, col_mix) or col
 
+# Test environment used during early engine development, contains basic materials and surfaces
 def world():
-	# Test environment used during early engine development, contains basic materials and surfaces
 	mat_red = data.Material(
 		function = material,
 		albedo = rgb(255, 0, 0),

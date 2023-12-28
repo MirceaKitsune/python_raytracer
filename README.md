@@ -16,7 +16,6 @@ The code is under the GPL license, created and developed by MirceaKitsune. Execu
 
   - [x] Programmable material functions. Each voxel can hold both unique material properties as well as a function that tells light rays how to behave upon collision.
   - [ ] Finish all basic material properties: Reflection (done), refraction, metalicity, emission, subsurface scattering. Currently there is no lighting system.
-  - [ ] Add a skybox system and support environment lighting. Currently everything not hit by a ray is a black void.
   - [ ] Support cammera rolling if this becomes possible. Current vector math doesn't support a third axis of transformation, you can only look horizontally and vertically.
   - [ ] Add perlin noise. May be possible to support an object based chunk system for generating infinite terrain.
   - [ ] Create a script to convert image slices into pixel meshes. This will allow importing 3D sprites from 2D images.
@@ -42,13 +41,12 @@ Settings are stored within the `config.cfg` file and can be used to modify how t
   - RENDER: Renderer related settings used by the camera.
     - fov: Field of view in degrees, higher values make the viewport wider.
     - dof: Depth of field in degrees, higher values result in more randomness added to the initial ray velocity and distance blur.
-    - fog: Amount by which distant rays will gradually fade before vanishing. Not to be confused with real volumetric fog, this only affects the alpha value used to indicate ray blending to material functions. 0 disables fog fading, higher values push the effect further while making it sharper.
     - skip: Pixels that are closer to the edge of the screen have a random chance of not being recalculated each frame. Improves performance at the cost of increased grain in the corners of the viewport where pixels may take a few frames to update.
     - blur: Simulates motion blur and DOF edge smoothing, also acts as a cheaper alternative to multisampling. Each frame the previous color of the pixel is gradually blended with the new color by this amount. 0 disables and will look very rough, higher values reduce noise and make viewport updates smoother. No performance benefit but looks better.
     - dist_min: Minimum ray distance, voxels won't be checked until the ray has preformed this number of steps.
     - dist_max: Maximum ray distance, calculation stops and ray color is returned after this number of steps have been preformed.
     - terminate_hits: Random chance that sampling stops after this number of hits. 0 disables bounces and allows direct hits only, 0.5 has a 50/50 chance of stopping at any step after the first bounce, 1 guarantees at least one bounce with no stopping, 1.5 adds a 50/50 chance of the second bounce not being stopped, 2 allows two bounces with no stopping, etc. Higher values improve performance at the cost of shorter distances and more blur for reflections.
-    - terminate_dist: Probability that sampling stops earlier the further a ray has traveled. 0 disables and lets all rays run at their full lifetime, 0.5 allows probabilistic termination to occur from halfway through a ray's life, 1 may terminate all rays but those just spawned in front of the camera. Improves performance but introduces noise in the distance.
+    - terminate_dist: Probability that sampling stops earlier the further a ray has traveled. 0 disables and lets all rays run at their full lifetime, 0.5 allows probabilistic termination to occur from halfway through a ray's life, 1 may terminate all rays but those just spawned in front of the camera. Improves performance but introduces noise in the distance, distant object will fade into the background gradually which looks better.
     - threads: The number of threads to use for ray tracing by the thread pool, 0 will use all CPU cores. The screen is divided in vertical chunks so that each thread processes and draws a different area of the canvas, ensure `height` is larger than and equally divisible by the thread count.
 
 The object list is the first property that must be passed to the Window class. Object arguments include:
@@ -83,3 +81,5 @@ A material function takes two parameters: The ray properties and the material we
   - hits: Represents the number of times this ray has bounced. The value is checked but not changed by the raytracer: The material function must increment this accordinfly to indicate how many bounces were preformed otherwise some features may not work correctly! Add 1 for a fully opaque bounce, a value between 0 and 1 to represent transparency for translucent voxels.
 
 Note that while you can modify any of the above properties on the material of a voxel from the material function, such modifications will be lost: Threads don't share changes with each other or the main thread, any modification will only be seen by the same process currently calculating the ray. If you wish to change a property on a voxel's material, do so in a custom function which ensures changes are returned to the main thread.
+
+Sky function: In addition to material functions which are executed when the ray touches a voxel, a background function will preform changes to the ray after it has preformed its last step, parsed as the parameter of the camera object. Unlike conventional materials the sky function doesn't have settings since only one exists and it operates in place, the only parameter is thus the `ray` object. There's no point in changing positional ray properties here as this always runs after the last step: You typically want to use velocity to produce a shape at infinite distance based on ray direction.

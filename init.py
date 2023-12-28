@@ -6,12 +6,12 @@ import time as t
 import pygame as pg
 import math
 
-import default
+import builtin
 import data
 import camera
 
 class Window:
-	def __init__(self):
+	def __init__(self, cam: camera.Camera):
 		# Read relevant settings
 		cfg_input = cfg.item("INPUT")
 		cfg_window = cfg.item("WINDOW")
@@ -28,7 +28,7 @@ class Window:
 
 		# Setup the camera and thread pool that will be used to update this window
 		self.pool = mp.Pool(processes = self.threads)
-		self.cam = camera.Camera()
+		self.cam = cam
 		self.rect = vec2(self.width, self.height)
 		self.rect_win = self.rect * self.scale
 
@@ -122,6 +122,7 @@ class Window:
 		self.screen.blit(text, (0, 0))
 		pg.display.update()
 
-# Create the main window and start Pygame
-default.world()
-Window()
+# Create the camera and main window to start Pygame
+builtin.world()
+cam = camera.Camera(builtin.material_sky)
+win = Window(cam)
