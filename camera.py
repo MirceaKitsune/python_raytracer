@@ -9,7 +9,7 @@ import random
 import data
 
 class Camera:
-	def __init__(self, objects):
+	def __init__(self):
 		# Read relevant settings
 		cfg_input = cfg.item("INPUT")
 		cfg_window = cfg.item("WINDOW")
@@ -27,10 +27,10 @@ class Camera:
 		self.terminate_hits = float(cfg_render["terminate_hits"]) or 0
 		self.terminate_dist = float(cfg_render["terminate_dist"]) or 0
 		self.threads = int(cfg_render["threads"]) or mp.cpu_count()
-		self.objects = objects
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
 		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
+		self.objects = []
 
 	def move(self, ofs: vec3):
 		if ofs.x != 0 or ofs.y != 0 or ofs.z != 0:
@@ -80,7 +80,6 @@ class Camera:
 			step = 0,
 			life = self.dist_max - self.dist_min,
 			hits = 0,
-			neighbors = [],
 		)
 
 		# Each step the ray advances through space by adding its velocity to its position, starting from the minimum distance and going up to the maximum distance
@@ -88,30 +87,29 @@ class Camera:
 		# If a material is found, its function is called which can modify any of the ray properties provided
 		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
 		while ray.step < ray.life:
-			ray.step += 1
-			ray.pos += ray.vel
-			pos_int = ray.pos.int()
 			for obj in self.objects:
-				if obj.active and obj.intersects(pos_int):
-					obj_pos = obj.pos_rel(pos_int)
+				if obj.intersects(ray.pos):
+					obj_pos = obj.pos_rel(ray.pos)
 					obj_mat = obj.get_voxel(obj_pos)
 					if obj_mat:
 						obj_mat.function(ray, obj_mat)
 
 			# Terminate this ray earlier in some circumstances to improve performance
-			if ray.hits > 0 and self.terminate_hits / ray.hits < random.random():
+			if ray.hits and self.terminate_hits / ray.hits < random.random():
 				break
 			elif ray.step / ray.life > 1 - self.terminate_dist * random.random():
 				break
 			elif ray.step / ray.life > 1 - self.fog:
 				ray.alpha *= self.fog
+			ray.step += 1
+			ray.pos += ray.vel
 
-		# Once ray calculations are done, return the resulting color in hex format or black if no changes were made
+		# Once ray calculations are done, return the resulting color or black if no changes were made
 		return ray.col or rgb(0, 0, 0)
 
 	def draw(self, thread):
 		# Create a new surface for this thread to paint to, returned to the main thread as a byte string
-		# The alpha channel is used for the blur effect by reducing how much the new image is added to the old canvas
+		# The alpha channel is used to skip drawing unchanged pixels and apply the blur effect by reducing how much the image blends to the canvas
 		srf = pg.Surface((self.width, math.ceil(self.height / self.threads)), pg.HWSURFACE + pg.SRCALPHA)
 		alpha = int(self.blur * 255)
 
@@ -131,4 +129,10 @@ class Camera:
 		return pg.image.tobytes(srf, "RGBA")
 
 	def pool(self, pool):
+		# Check which objects are active and close enough to the camera to be seen, add valid entries to the local object storage
+		self.objects = []
+		for obj in data.objects:
+			if obj.active and obj.distance(self.pos) <= self.dist_max:
+				self.objects.append(obj)
+
 		return pool.map(self.draw, range(self.threads))

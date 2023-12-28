@@ -6,11 +6,12 @@ import time as t
 import pygame as pg
 import math
 
+import default
 import data
 import camera
 
 class Window:
-	def __init__(self, objects):
+	def __init__(self):
 		# Read relevant settings
 		cfg_input = cfg.item("INPUT")
 		cfg_window = cfg.item("WINDOW")
@@ -27,7 +28,7 @@ class Window:
 
 		# Setup the camera and thread pool that will be used to update this window
 		self.pool = mp.Pool(processes = self.threads)
-		self.cam = camera.Camera(objects)
+		self.cam = camera.Camera()
 		self.rect = vec2(self.width, self.height)
 		self.rect_win = self.rect * self.scale
 
@@ -121,35 +122,6 @@ class Window:
 		self.screen.blit(text, (0, 0))
 		pg.display.update()
 
-# Spawn test environment
-mat_red = data.Material(
-	function = data.material_default,
-	albedo = rgb(255, 0, 0),
-	roughness = 0.1,
-	translucency = 0,
-	group = "solid",
-)
-mat_green = data.Material(
-	function = data.material_default,
-	albedo = rgb(0, 255, 0),
-	roughness = 0.1,
-	translucency = 0,
-	group = "solid",
-)
-mat_blue = data.Material(
-	function = data.material_default,
-	albedo = rgb(0, 0, 255),
-	roughness = 0.1,
-	translucency = 0,
-	group = "solid",
-)
-
-obj_environment = data.Object(origin = vec3(0, 0, 0), size = vec3(16, 16, 16), active = True)
-obj_environment.set_voxel_area(vec3(0, 0, 0), vec3(15, 15, 0), mat_red)
-obj_environment.set_voxel_area(vec3(0, 0, 0), vec3(0, 15, 15), mat_green)
-obj_environment.set_voxel_area(vec3(0, 15, 0), vec3(15, 15, 15), mat_blue)
-
-objects = []
-objects.append(obj_environment)
-
-Window(objects)
+# Create the main window and start Pygame
+default.world()
+Window()

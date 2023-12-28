@@ -4,41 +4,12 @@ from lib import *
 import copy
 import random
 
-# Default material function, mods can provide materials that use their own functions if desired
-def material_default(ray, mat):
-	# Color: Use material color darkened by alpha value, mixing reduces with the number of hits as bounces lose energy
-	col = mat.albedo.mix(rgb(0, 0, 0), 1 - ray.alpha)
-	col_mix = 1 / (1 + ray.hits)
-	ray.col = ray.col and ray.col.mix(col, col_mix) or col
-
-	# Roughness: Velocity is randomized with the roughness value, a roughness of 1 can send the ray in almost any direction
-	ray.vel += vec3(rand(mat.roughness), rand(mat.roughness), rand(mat.roughness))
-
-	# Velocity: Estimate the normal direction of the voxel based on its neighbors, bounce the ray back for solid bounces but not translucent ones
-	# Reflections may occur in one or all three axis, diagonal face normals are not supported but corner voxels may act as a 45* mirror
-	if mat.translucency < random.random():
-		if ray.vel.x > 0 and mat.normals[0]:
-			ray.vel.x *= -1
-		elif ray.vel.x < 0 and mat.normals[1]:
-			ray.vel.x *= -1
-		if ray.vel.y > 0 and mat.normals[2]:
-			ray.vel.y *= -1
-		elif ray.vel.y < 0 and mat.normals[3]:
-			ray.vel.y *= -1
-		if ray.vel.z > 0 and mat.normals[4]:
-			ray.vel.z *= -1
-		elif ray.vel.z < 0 and mat.normals[5]:
-			ray.vel.z *= -1
-	ray.vel = ray.vel.normalize()
-
-	# Hits: Increase the number of hits based on material translucency
-	ray.hits += 1 - mat.translucency
-
-	return True
+# Global container for all objects, accessed by the window and camera
+objects = []
 
 class Material:
 	def __init__(self, **settings):
-		self.function = "function" in settings and settings["function"] or material_default
+		self.function = "function" in settings and settings["function"] or None
 		self.group = None
 		self.normals = None
 		for s in settings:
@@ -50,13 +21,15 @@ class Material:
 
 class Object:
 	def __init__(self, **settings):
-		# Origin is the center of the object, mins and maxs represent the start and end corners, updated when moving the object to avoid costly checks during ray tracing
-		self.origin = settings["origin"] or vec3(0, 0, 0)
+		# pos is the center of the object in world space, dist is size / 2 and represents distance from the origin to each bounding box surface
+		# mins and maxs represent the start and end corners in world space, updated when moving the object to avoid costly checks during ray tracing
+		self.pos = settings["pos"] or vec3(0, 0, 0)
 		self.size = settings["size"] or vec3(0, 0, 0)
 		self.active = settings["active"] or False
+		self.dist = self.size / 2
 		self.mins = vec3(0, 0, 0)
 		self.maxs = vec3(0, 0, 0)
-		self.move(self.origin)
+		self.move(self.pos)
 
 		# Initialize the voxel list with empty material positions filling the bounding box of this object
 		# Sprites can store alternate models which may be activated or mixed on demand to replace the active mesh
@@ -65,6 +38,19 @@ class Object:
 		self.voxels = []
 		for i in range(self.size.x * self.size.y * self.size.z):
 			self.voxels.append(None)
+
+		# Add self to the list of objects, the object deletes itself from the list when removed
+		objects.append(self)
+
+	def remove(self):
+		objects.remove(self)
+
+	# Get the distance from the bounding box surface to the given position
+	def distance(self, pos: vec3):
+		x = max(0, abs(self.pos.x - pos.x) - self.dist.x)
+		y = max(0, abs(self.pos.y - pos.y) - self.dist.y)
+		z = max(0, abs(self.pos.z - pos.z) - self.dist.z)
+		return max(x, y, z)
 
 	# Check whether a point position is inside the bounding box of this object
 	def intersects(self, pos: vec3):
@@ -88,11 +74,9 @@ class Object:
 
 	# Moves this object to a new origin, update mins and maxs to represent the bounding box in space
 	def move(self, pos):
-		self.origin = pos.int()
-		size = self.size / 2
-		size = size.int()
-		self.mins = self.origin - size
-		self.maxs = self.origin + size
+		self.pos = pos.int()
+		self.mins = self.pos - self.dist
+		self.maxs = self.pos + self.dist
 
 	# Remove a sprite from the sprite list
 	def del_sprite(self, sprite: str):
@@ -123,7 +107,7 @@ class Object:
 	# Get the voxel at this position, returns the material or None if empty
 	# Position is in local space, always convert the position with pos_rel before calling this
 	def get_voxel(self, pos: vec3):
-		i = vec3_index(pos, self.size.x, self.size.y)
+		i = vec3_index(pos.int(), self.size.x, self.size.y)
 		if i < len(self.voxels):
 			return self.voxels[i]
 		return None
@@ -148,7 +132,7 @@ class Object:
 			print("Warning: Attempted to set voxel outside of object boundaries at position " + pos.string() + ".")
 			return
 
-		i = vec3_index(pos, self.size.x, self.size.y)
+		i = vec3_index(pos.int(), self.size.x, self.size.y)
 		if i < len(self.voxels):
 			self.voxels[i] = mat and copy.copy(mat) or None
 

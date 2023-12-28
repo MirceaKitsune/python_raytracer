@@ -68,7 +68,7 @@ class vec2:
 
 	def normalize(self):
 		ref = max(abs(self.x), abs(self.y))
-		if ref > 0:
+		if ref:
 			return vec2(self.x, self.y) / ref
 		return self
 
@@ -135,7 +135,7 @@ class vec3:
 
 	def normalize(self):
 		ref = max(abs(self.x), abs(self.y), abs(self.z))
-		if ref > 0:
+		if ref:
 			return vec3(self.x, self.y, self.z) / ref
 		return self
 
