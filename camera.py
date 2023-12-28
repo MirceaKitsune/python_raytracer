@@ -26,15 +26,11 @@ class Camera:
 		self.dist_max = int(cfg_render["dist_max"]) or 24
 		self.terminate_hits = float(cfg_render["terminate_hits"]) or 0
 		self.terminate_dist = float(cfg_render["terminate_dist"]) or 0
-		self.lines = int(cfg_render["lines"]) or self.height
+		self.threads = int(cfg_render["threads"]) or mp.cpu_count()
 		self.objects = objects
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
 		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
-		self.weights = [1] * (self.width * self.height)
-
-	def set_weight(self, i: int, amount: float):
-		self.weights[i] = (self.weights[i] + amount) / 2
 
 	def move(self, ofs: vec3):
 		if ofs.x != 0 or ofs.y != 0 or ofs.z != 0:
@@ -113,25 +109,26 @@ class Camera:
 		# Once ray calculations are done, return the resulting color in hex format or black if no changes were made
 		return ray.col or rgb(0, 0, 0)
 
-	def draw(self, line):
+	def draw(self, thread):
 		# Create a new surface for this thread to paint to, returned to the main thread as a byte string
 		# The alpha channel is used for the blur effect by reducing how much the new image is added to the old canvas
-		srf = pg.Surface((self.width, self.lines), pg.SRCALPHA)
+		srf = pg.Surface((self.width, math.ceil(self.height / self.threads)), pg.HWSURFACE + pg.SRCALPHA)
+		alpha = int(self.blur * 255)
 
 		# Trace every pixel on this surface, the 2D position of each pixel is deduced from its index
 		# i is the pixel index relative to the local surface, index is the pixel index at its real position in the window
-		for i in range(0, self.lines * self.width):
-			index = (line * self.lines * self.width) + i
+		pixels = math.ceil(self.height / self.threads) * self.width
+		for i in range(pixels):
+			index = thread * pixels + i
 			if index >= self.width * self.height:
 				break
 
 			col = self.draw_trace(index)
 			if col:
-				alpha = int(self.blur * 255)
 				srf_pos = index_vec2(i, self.width)
 				srf.set_at(srf_pos.tuple(), col.tuple() + (alpha,))
 
 		return pg.image.tobytes(srf, "RGBA")
 
 	def pool(self, pool):
-		return pool.map(self.draw, range(0, math.ceil(self.height / self.lines)))
+		return pool.map(self.draw, range(self.threads))

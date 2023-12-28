@@ -49,8 +49,7 @@ Settings are stored within the `config.cfg` file and can be used to modify how t
     - dist_max: Maximum ray distance, calculation stops and ray color is returned after this number of steps have been preformed.
     - terminate_hits: Random chance that sampling stops after this number of hits. 0 disables bounces and allows direct hits only, 0.5 has a 50/50 chance of stopping at any step after the first bounce, 1 guarantees at least one bounce with no stopping, 1.5 adds a 50/50 chance of the second bounce not being stopped, 2 allows two bounces with no stopping, etc. Higher values improve performance at the cost of shorter distances and more blur for reflections.
     - terminate_dist: Probability that sampling stops earlier the further a ray has traveled. 0 disables and lets all rays run at their full lifetime, 0.5 allows probabilistic termination to occur from halfway through a ray's life, 1 may terminate all rays but those just spawned in front of the camera. Improves performance but introduces noise in the distance.
-    - threads: The number of threads to use for ray tracing by the thread pool, 0 will use all CPU cores.
-    - lines: Determines the screen area each thread will process. Divides the screen in vertical lines so the total number of jobs is `height / lines`: Should always be lower than `height`, dividing the height by this value should result in an even number. Low values tend to improve performance in raytracing threads at the cost of more effort on the main thread when mixing the resulting images.
+    - threads: The number of threads to use for ray tracing by the thread pool, 0 will use all CPU cores. The screen is divided in vertical chunks so that each thread processes and draws a different area of the canvas, ensure `height` is larger than and equally divisible by the thread count.
 
 The object list is the first property that must be passed to the Window class. Object arguments include:
 

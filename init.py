@@ -4,6 +4,7 @@ from lib import *
 import multiprocessing as mp
 import time as t
 import pygame as pg
+import math
 
 import data
 import camera
@@ -22,7 +23,6 @@ class Window:
 		self.smooth = int(cfg_window["smooth"]) or 0
 		self.fps = int(cfg_window["fps"]) or 30
 		self.threads = int(cfg_render["threads"]) or mp.cpu_count()
-		self.lines = int(cfg_render["lines"]) or self.height
 		self.mouselook = True
 
 		# Setup the camera and thread pool that will be used to update this window
@@ -34,8 +34,8 @@ class Window:
 		# Configure and start Pygame
 		pg.init()
 		pg.display.set_caption("Voxel Tracer")
-		self.screen = pg.display.set_mode(self.rect_win.tuple())
-		self.canvas = pg.Surface(self.rect.tuple())
+		self.screen = pg.display.set_mode(self.rect_win.tuple(), pg.HWSURFACE)
+		self.canvas = pg.Surface(self.rect.tuple(), pg.HWSURFACE)
 		self.font = pg.font.SysFont(None, 24)
 		self.clock = pg.time.Clock()
 		self.running = True
@@ -106,10 +106,12 @@ class Window:
 
 	def update(self):
 		# Request the camera to draw new tiles, add the image of each tile to the canvas at its correct position once all segments have been received
+		tiles = []
 		result = self.cam.pool(self.pool)
-		for i, s in enumerate(result):
-			srf = pg.image.frombytes(s, (self.width, self.lines), "RGBA")
-			self.canvas.blit(srf, (0, i * self.lines))
+		for i in range(len(result)):
+			srf = pg.image.frombytes(result[i], (self.width, math.ceil(self.height / self.threads)), "RGBA")
+			tiles.append((srf, (0, math.ceil(self.height / self.threads) * i)))
+		self.canvas.blits(tiles)
 
 		# Draw the canvas and info text onto the screen
 		canvas = self.smooth and pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) or pg.transform.scale(self.canvas, self.rect_win.tuple())

@@ -63,7 +63,7 @@ class Object:
 		# The voxel list is ordered, 3D position is converted from the index to know which position a voxel refers to
 		self.sprites = {}
 		self.voxels = []
-		for i in range(0, self.size.x * self.size.y * self.size.z):
+		for i in range(self.size.x * self.size.y * self.size.z):
 			self.voxels.append(None)
 
 	# Check whether a point position is inside the bounding box of this object
@@ -101,7 +101,7 @@ class Object:
 
 	# Mix another sprite into the given sprite, None ignores changes so empty spaces don't override
 	def mix_sprite(self, sprite: str, other: str):
-		for i in range(0, self.size.x * self.size.y * self.size.z):
+		for i in range(self.size.x * self.size.y * self.size.z):
 			if self.sprites[other][i]:
 				self.sprites[sprite][i] = self.sprites[other][i]
 
@@ -112,7 +112,7 @@ class Object:
 			self.sprites[sprite] = data
 		else:
 			self.sprites[sprite] = []
-			for i in range(0, self.size.x * self.size.y * self.size.z):
+			for i in range(self.size.x * self.size.y * self.size.z):
 				self.sprites[sprite][i] = None
 
 	# Set a sprite as the current voxel mesh
