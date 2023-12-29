@@ -17,6 +17,7 @@ class Camera:
 		self.max_pitch = float(cfg_input["max_pitch"]) or 0
 		self.width = int(cfg_window["width"]) or 120
 		self.height = int(cfg_window["height"]) or 60
+		self.ambient = float(cfg_render["ambient"]) or 0
 		self.fov = float(cfg_render["fov"]) or 90
 		self.dof = float(cfg_render["dof"]) or 0
 		self.skip = float(cfg_render["skip"]) or 0
@@ -74,6 +75,8 @@ class Camera:
 		# Ray data is kept in a data store so it can be easily delivered to material functions and support custom properties
 		ray = store(
 			col = None,
+			absorption = 1,
+			energy = self.ambient,
 			pos = self.pos + ray_dir * self.dist_min,
 			vel = ray_dir,
 			step = 0,
@@ -103,7 +106,7 @@ class Camera:
 
 		# Once ray calculations are done, run the background function and return the resulting color
 		self.bg(ray)
-		return ray.col
+		return ray.col.mix(rgb(0, 0, 0), 1 - ray.energy)
 
 	def draw(self, thread):
 		# Create a new surface for this thread to paint to, returned to the main thread as a byte string

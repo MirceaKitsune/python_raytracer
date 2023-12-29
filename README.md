@@ -15,7 +15,6 @@ The code is under the GPL license, created and developed by MirceaKitsune. Execu
 ## Features and TODO
 
   - [x] Programmable material functions. Each voxel can hold both unique material properties as well as a function that tells light rays how to behave upon collision.
-  - [ ] Finish all basic material properties: Reflection (done), refraction, metalicity, emission, subsurface scattering. Currently there is no lighting system.
   - [ ] Support cammera rolling if this becomes possible. Current vector math doesn't support a third axis of transformation, you can only look horizontally and vertically.
   - [ ] Add perlin noise. May be possible to support an object based chunk system for generating infinite terrain.
   - [ ] Create a script to convert image slices into pixel meshes. This will allow importing 3D sprites from 2D images.
@@ -39,6 +38,7 @@ Settings are stored within the `config.cfg` file and can be used to modify how t
     - smooth: If false pixels are always sharp, if true use a bilinear filter when upscaling to the `scale` factor.
     - fps: Target number of frames per second, the end result may be lower or higher based on practical performance. FPS will be lowered when the window is not focused.
   - RENDER: Renderer related settings used by the camera.
+    - ambient: Ambient light intensity, light rays start with this amount of energy.
     - fov: Field of view in degrees, higher values make the viewport wider.
     - dof: Depth of field in degrees, higher values result in more randomness added to the initial ray velocity and distance blur.
     - skip: Pixels that are closer to the edge of the screen have a random chance of not being recalculated each frame. Improves performance at the cost of increased grain in the corners of the viewport where pixels may take a few frames to update.
@@ -61,8 +61,11 @@ A material is registered using the register_material call with a list of setting
 
   - function: Material function to call when a ray hits this material, use material_default unless you want a custom shader. 
   - albedo: The color of this material in hex format, eg: `#ff7f00`.
-  - roughness: This amount of random roughness is added to the ray velocity when reflected or refracted.
-  - translucency: Chance that a ray will pass through this voxel instead of being bounced back, probabilistically simulates transparency. Can be used to create volumetric fog, this is costly and should be done in small areas.
+  - roughness: This amount of random roughness is added to the ray velocity when reflected or refracted. Blurs reflections, if `translucency` is enabled this blur rays passing through.
+  - metalicity: Controls the amount of color and energy absorption on the ray. 0 acts as a perfect solid and stops color absorption while halving energy absorption... 1 is a perfect mirror and leaves both unchanged. For plastic use 0, for metal use 0.5, for a mirror use 1.
+  - ior: Amount by which light rays will be reflected by the surface or pass through it. Note that this isn't an accurate IOR value and only named that way for familiarity, this is a multiplier for how much the ray is reflected or passes through. If the material represents an opaque surface it should be 1 for accurate ray bounces, can be slightly lowered to simulate anisotropy... a value close to 0.5 can be used to send rays inward and encourage subsurface scattering... if transparent it should be well below 0.5 to send light rays through, use a low value to simulate IOR or 0 to leave ray velocity unchanged.
+  - density: Transparency level of this material. Values below 1 should be accompanies by an `ior` lower than 0.5 for it to act like a transparent surface. 1 is completely solid, lower slightly to allow some subsurface scattering... can be used to create volumetric fog with an `ior` of 0, this may be costly and reduce ray distance thus should be done sparingly.
+  - energy: Amount of surface energy. 0 for normal surfaces, above 0 for surfaces that emit light.
   - group: Builtin material property representing a group other materials should interact with. Voxels will only treat neighbors with the same value as solid when calculating surface normals.
   - normals: Builtin material property set by objects when updating voxels, does not need to be included in the material definition. Represents the directions in which this voxel contains open spaces, used to determine face direction for reflecting rays. Neighbor order is `-x +x -y +y -z +z`.
 
@@ -73,7 +76,8 @@ The engine allows creating custom materials which can have their own functions t
 A material function takes two parameters: The ray properties and the material we hit. Each function definition should thus be of the form `material_custom(ray, mat)`. See the default material section for the properties of the default material, eg: `mat.albedo` can be used to read color. Custom material settings are allowed for use in custom functions, as are custom ray properties which can be used to store data between ray hits. The following ray properties are used internally by the raytracer:
 
   - col: The color the ray has so far. This is usually the most important property to modify. If this is the first bounce col will be None instead of RGB, always check for its existence before preforming modifications.
-  - alpha: Starts at 1 and is lowered by the raytracer based on ray distance and the `fog` setting. Used to indicate how much this ray should blend over the background: The material function can use this to apply transparency accordingly, use this to fade to the world background color.
+  - absorption: Ability of this ray to change its color, should be modified based on the `metalicity` setting of the material being hit. Color mixing should always be done based on this value, eg: `ray.col.mix(mat.albedo, ray.absorption)`. Starts at 1 and should be decreased by opaque hits that lack metalicity. Lower values blend future colors with less intensity, once 0 the color should no longer be changed... energy can still be updated so sampling should continue even at 0 color absorption.
+  - energy: The amount of light the ray carries. `col` is multiplied by this value when applied to the screen. Starts out at the `ambient` configuration: This should decrease with bounces based on material absorption, as well as increase when an emissive surface is hit.
   - pos: Current ray position. This should not be changed directly unless there's a reason to teleport the ray.
   - vel: Current ray velocity. The speed of light is 1, meaning at least one axis must be precisely -1 or +1 while the other two may be anything in that range: Always use `vec3.normalize` after making changes, otherwise values `> abs(1)` will cause voxels to be skipped while values `< abs(1)` can cause the same voxel to be calculated twice!
   - step: The number of steps this ray has preformed. 1 is a ray that was just spawned at the camera's minimum draw distance, if `step` equals `life - 1` this is the last move the ray will preform. Only modify this if you want to give the ray a one time boost, change `life` to properly alter the lifetime.
