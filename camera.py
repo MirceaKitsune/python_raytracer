@@ -18,6 +18,7 @@ class Camera:
 		self.width = int(cfg_window["width"]) or 120
 		self.height = int(cfg_window["height"]) or 60
 		self.ambient = float(cfg_render["ambient"]) or 0
+		self.static = int(cfg_render["static"]) or 0
 		self.fov = float(cfg_render["fov"]) or 90
 		self.dof = float(cfg_render["dof"]) or 0
 		self.skip = float(cfg_render["skip"]) or 0
@@ -85,9 +86,11 @@ class Camera:
 		)
 
 		# Each step the ray advances through space by adding its velocity to its position, starting from the minimum distance and going up to the maximum distance
-		# As voxels exist at integer numbers, the float position is rounded to check if a voxel is located at this spot
 		# If a material is found, its function is called which can modify any of the ray properties provided
 		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
+		# Optionally the random seed is set to the index of the pixel so random noise in ray calculations cam be static instead of flickering
+		if self.static:
+			random.seed(i)
 		while ray.step < ray.life:
 			for obj in self.objects:
 				obj_pos = obj.pos_rel(ray.pos)
@@ -103,10 +106,11 @@ class Camera:
 				break
 			ray.step += 1
 			ray.pos += ray.vel
+		random.seed(None)
 
 		# Once ray calculations are done, run the background function and return the resulting color
 		self.bg(ray)
-		return ray.col.mix(rgb(0, 0, 0), 1 - ray.energy)
+		return ray.col and ray.col.mix(rgb(0, 0, 0), 1 - ray.energy) or None
 
 	def draw(self, thread):
 		# Create a new surface for this thread to paint to, returned to the main thread as a byte string

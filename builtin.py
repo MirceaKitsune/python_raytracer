@@ -5,21 +5,28 @@ import data
 
 # Default material function, designed as a simplified PBR shader
 def material(ray, mat):
-	# Color: Apply the material color, mixing reduces with the number of hits as bounces lose energy
-	if not ray.col:
-		ray.col = mat.albedo
-	elif ray.absorption:
-		ray.col = ray.col.mix(mat.albedo, ray.absorption)
-	ray.absorption *= (1 - mat.density) + (mat.metalicity / (1 + ray.hits)) * mat.density
+	# Hits: Increase the number of hits based on material density, glass and fog have a lower probability of terminating rays sooner
+	ray.hits += mat.density
 
-	# Energy: Cause the ray to lose energy when hitting a surface that absorbs light, determined by metalicity
-	# Increase energy when hitting an emissive surface
-	ray.energy /= 2 - mat.metalicity
+	# Color and absorption:
+	# 1: Hitting an emissive surface increases the ray's ability to absorb color, ensures lights transmit their color in reflections
+	# 2: Mix the material's albedo to the ray color based on the ray's color absorption, if a ray color doesn't already exist use albedo as is
+	# 3: Reduce the ray's absorption by the lack of metalicity scaled by the density of this interaction, a perfect mirror or transparent hit has no effect
+	ray.absorption = min(1, ray.absorption + mat.energy)
+	ray.col = ray.col and ray.col.mix(mat.albedo, ray.absorption) or mat.albedo
+	ray.absorption *= mix(1, mat.metalicity, mat.density)
+
+	# Energy:
+	# 1: Cause the ray to lose energy when hitting a surface based on the roughness of the interaction
+	# 2: Increase the ray's energy when hitting an emissive surface, this is what makes light shine on other surfaces
+	ray.energy *= 1 - mat.roughness
 	ray.energy = min(1, ray.energy + mat.energy)
 
-	# Roughness: Velocity is randomized with the roughness value, a roughness of 1 can send the ray in almost any direction
-	# Translucency: Estimate the normal direction of the voxel based on its neighbors, bounce the ray back based on the amount of transparency
-	# Reflections may occur in one or all three axis, diagonal face normals are not supported but corner voxels may act as a 45* mirror
+	# Roughness and translucency:
+	# 1: Velocity is randomized by the roughness value of the interaction, 0 is perfectly sharp while 1 can send the ray in almost any direction
+	# 2: Flip the appropriate axes in the ray velocity based on the normals of the voxel, the flipped velocity is then blended to the old velocity based on ior
+	# 3: Normalize ray velocity after making changes, this ensures the speed of light remains 1 and future voxels aren't skipped or calculated twice
+	# Note: Reflections may occur in one or all three axis, diagonal normals aren't supported but corner voxels can mirror rays in multiple directions
 	ray.vel += vec3(rand(mat.roughness), rand(mat.roughness), rand(mat.roughness))
 	if mat.ior:
 		vel = vec3(ray.vel.x, ray.vel.y, ray.vel.z)
@@ -37,9 +44,6 @@ def material(ray, mat):
 			vel.z *= -1
 		ray.vel = ray.vel.mix(vel, mat.ior)
 	ray.vel = ray.vel.normalize()
-
-	# Hits: Increase the number of hits based on material density
-	ray.hits += mat.density
 
 # Default background function, generates a simple sky
 def material_sky(ray):
@@ -81,22 +85,22 @@ def world():
 	)
 	mat_translucent = data.Material(
 		function = material,
-		albedo = rgb(255, 255, 255),
+		albedo = rgb(0, 255, 255),
 		metalicity = 0,
 		roughness = 0,
 		ior = 0.25,
-		density = 0.1,
+		density = 0.25,
 		energy = 0,
 		group = "glass",
 	)
 	mat_light = data.Material(
 		function = material,
-		albedo = rgb(255, 255, 255),
+		albedo = rgb(255, 0, 255),
 		metalicity = 0,
 		roughness = 0,
 		ior = 1,
 		density = 1,
-		energy = 1,
+		energy = 0.25,
 		group = "glass",
 	)
 

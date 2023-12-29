@@ -191,6 +191,11 @@ def rand(amp: float):
 		return 0
 	return (-1 + random.random() * 2) * amp
 
+# Mix: Mixes two values based on a bias
+def mix(val1, val2, bias1):
+	bias2 = 1 - bias1
+	return val1 * bias2 + val2 * bias1
+
 # Normalize: Returns a 0 to 1 range representing the position of x between x_min and x_max
 def normalize(x, x_min, x_max):
 	if x_min >= x_max:
