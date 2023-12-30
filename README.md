@@ -20,7 +20,6 @@ The code is under the GPL license, created and developed by MirceaKitsune. Execu
   - [ ] Add perlin noise. May be possible to support an object based chunk system for generating infinite terrain.
   - [ ] Create a script to convert image slices into pixel meshes. This will allow importing 3D sprites from 2D images.
   - [ ] Support sprite animation. Basic support for sprite sets already exists: Once images can be imported as sprites allow changing the mesh periodically to play animations.
-  - [ ] Allow object rotation. Fine rotation will likely never be possible, but rotations of 90* / 180* / 270* will be possible to support in the future.
   - [ ] Support object movement and a basic physics system. Objects can only move at integer positions, collisions will be checked by finding intersecting voxels. May require a separate thread pool.
   - [ ] Sound support in the form of either audio files or a frequency generator associated with materials. Audio is also intended to be raytraced.
 

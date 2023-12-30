@@ -29,15 +29,14 @@ class Object:
 		self.dist = self.size / 2
 		self.mins = vec3(0, 0, 0)
 		self.maxs = vec3(0, 0, 0)
+		self.angle = 0
 		self.move(self.pos)
 
 		# Initialize the voxel list with empty material positions filling the bounding box of this object
 		# Sprites can store alternate models which may be activated or mixed on demand to replace the active mesh
 		# The voxel list is ordered, 3D position is converted from the index to know which position a voxel refers to
 		self.sprites = {}
-		self.voxels = []
-		for i in range(self.size.x * self.size.y * self.size.z):
-			self.voxels.append(None)
+		self.voxels = [None] * self.size.x * self.size.y * self.size.z
 
 		# Add self to the list of objects, the object deletes itself from the list when removed
 		objects.append(self)
@@ -74,6 +73,39 @@ class Object:
 		self.pos = pos.int()
 		self.mins = self.pos - self.dist
 		self.maxs = self.pos + self.dist
+
+	# Rotates the object and its voxels around the Y axis in 90 degree increments
+	def rotate(self, angle: float):
+		# Determine if this change induces a rotation compared to the existing angle and by what magnitude
+		# Only preform voxel mesh rotation if the object now faces toward a different 0* / 90* / 180* / 270* direction
+		ang_old = round(self.angle / 90)
+		ang_new = round((self.angle + angle) / 90)
+		ang = (ang_new - ang_old) % 4
+		self.angle = (self.angle + angle) % 360
+		if not ang:
+			return
+
+		# Remember old voxel data used to regenerate the voxel array
+		# If this is a 90* or 270* rotation, the x and z size are also swapped
+		old_voxels = self.voxels
+		old_size = self.size
+		if ang == 1 or ang == 3:
+			self.size = vec3(self.size.z, self.size.y, self.size.x)
+			self.dist = self.size / 2
+			self.mins = self.pos - self.dist
+			self.maxs = self.pos + self.dist
+
+		# Generate new voxel list rotated at the given angle: 1 = 90*, 2 = 180*, 3 = 270*
+		self.voxels = [None] * self.size.x * self.size.y * self.size.z
+		for i in range(len(old_voxels)):
+			pos = index_vec3(i, old_size.x, old_size.y)
+			if ang == 1:
+				pos = vec3(pos.z, pos.y, (old_size.x - 1) - pos.x)
+			elif ang == 2:
+				pos = vec3((old_size.x - 1) - pos.x, pos.y, (old_size.z - 1) - pos.z)
+			elif ang == 3:
+				pos = vec3((old_size.z - 1) - pos.z, pos.y, pos.x)
+			self.set_voxel(pos, old_voxels[i])
 
 	# Remove a sprite from the sprite list
 	def del_sprite(self, sprite: str):
