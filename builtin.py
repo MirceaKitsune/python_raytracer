@@ -5,8 +5,8 @@ import data
 
 # Default material function, designed as a simplified PBR shader
 def material(ray, mat):
-	# Hits: Increase the number of hits based on material density, glass and fog have a lower probability of terminating rays sooner
-	ray.hits += mat.density
+	# Hits: Increase the number of hits based on material ior, glass and fog have a lower probability of terminating rays sooner
+	ray.hits += mat.ior
 
 	# Color and absorption:
 	# 1: Hitting an emissive surface increases the ray's ability to absorb color, ensures lights transmit their color in reflections
@@ -14,7 +14,7 @@ def material(ray, mat):
 	# 3: Reduce the ray's absorption by the lack of metalicity scaled by the density of this interaction, a perfect mirror or transparent hit has no effect
 	ray.absorption = min(1, ray.absorption + mat.energy)
 	ray.col = ray.col and ray.col.mix(mat.albedo, ray.absorption) or mat.albedo
-	ray.absorption *= mix(1, mat.metalicity, mat.density)
+	ray.absorption *= 1 - mat.absorption
 
 	# Energy:
 	# 1: Cause the ray to lose energy when hitting a surface based on the roughness of the interaction
@@ -56,61 +56,56 @@ def world():
 	mat_opaque_red = data.Material(
 		function = material,
 		albedo = rgb(255, 0, 0),
-		metalicity = 0,
 		roughness = 0.1,
+		absorption = 1,
 		ior = 1,
-		density = 1,
 		energy = 0,
 		group = "solid",
 	)
 	mat_opaque_green = data.Material(
 		function = material,
 		albedo = rgb(0, 255, 0),
-		metalicity = 0,
 		roughness = 0.1,
+		absorption = 1,
 		ior = 1,
-		density = 1,
 		energy = 0,
 		group = "solid",
 	)
 	mat_opaque_blue = data.Material(
 		function = material,
 		albedo = rgb(0, 0, 255),
-		metalicity = 0,
 		roughness = 0.1,
+		absorption = 1,
 		ior = 1,
-		density = 1,
 		energy = 0,
 		group = "solid",
 	)
 	mat_translucent = data.Material(
 		function = material,
 		albedo = rgb(0, 255, 255),
-		metalicity = 0,
 		roughness = 0,
+		absorption = 0.25,
 		ior = 0.25,
-		density = 0.25,
 		energy = 0,
 		group = "glass",
 	)
 	mat_light = data.Material(
 		function = material,
 		albedo = rgb(255, 0, 255),
-		metalicity = 0,
 		roughness = 0,
+		absorption = 1,
 		ior = 1,
-		density = 1,
 		energy = 0.25,
 		group = "glass",
 	)
 
-	spr = data.Sprite(size = vec3(16, 16, 16))
-	spr.set_voxel_area(vec3(0, 0, 0), vec3(15, 15, 0), mat_opaque_red)
-	spr.set_voxel_area(vec3(0, 0, 0), vec3(0, 15, 15), mat_opaque_green)
-	spr.set_voxel_area(vec3(0, 15, 0), vec3(15, 15, 15), mat_opaque_blue)
-	spr.set_voxel_area(vec3(10, 10, 4), vec3(14, 14, 8), mat_translucent)
-	spr.set_voxel_area(vec3(4, 10, 10), vec3(8, 14, 14), mat_light)
+	spr = data.Sprite(size = vec3(16, 16, 16), frames = 1)
+	spr.set_voxel_area(0, vec3(0, 0, 0), vec3(15, 15, 0), mat_opaque_red)
+	spr.set_voxel_area(0, vec3(0, 0, 0), vec3(0, 15, 15), mat_opaque_green)
+	spr.set_voxel_area(0, vec3(0, 15, 0), vec3(15, 15, 15), mat_opaque_blue)
+	spr.set_voxel_area(0, vec3(10, 10, 4), vec3(14, 14, 8), mat_translucent)
+	spr.set_voxel_area(0, vec3(4, 10, 10), vec3(8, 14, 14), mat_light)
+	spr.set_normals(0)
 
 	obj = data.Object(pos = vec3(0, 0, 0))
-	obj.set_sprite("default", spr)
-	obj.activate_sprite("default")
+	obj.set_sprite(spr)
