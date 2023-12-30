@@ -104,9 +104,13 @@ def world():
 		group = "glass",
 	)
 
-	obj = data.Object(pos = vec3(0, 0, 0), size = vec3(16, 16, 16), active = True)
-	obj.set_voxel_area(vec3(0, 0, 0), vec3(15, 15, 0), mat_opaque_red)
-	obj.set_voxel_area(vec3(0, 0, 0), vec3(0, 15, 15), mat_opaque_green)
-	obj.set_voxel_area(vec3(0, 15, 0), vec3(15, 15, 15), mat_opaque_blue)
-	obj.set_voxel_area(vec3(10, 10, 4), vec3(14, 14, 8), mat_translucent)
-	obj.set_voxel_area(vec3(4, 10, 10), vec3(8, 14, 14), mat_light)
+	spr = data.Sprite(size = vec3(16, 16, 16))
+	spr.set_voxel_area(vec3(0, 0, 0), vec3(15, 15, 0), mat_opaque_red)
+	spr.set_voxel_area(vec3(0, 0, 0), vec3(0, 15, 15), mat_opaque_green)
+	spr.set_voxel_area(vec3(0, 15, 0), vec3(15, 15, 15), mat_opaque_blue)
+	spr.set_voxel_area(vec3(10, 10, 4), vec3(14, 14, 8), mat_translucent)
+	spr.set_voxel_area(vec3(4, 10, 10), vec3(8, 14, 14), mat_light)
+
+	obj = data.Object(pos = vec3(0, 0, 0))
+	obj.set_sprite("default", spr)
+	obj.activate_sprite("default")
