@@ -2,7 +2,6 @@
 from lib import *
 
 import multiprocessing as mp
-import time as t
 import pygame as pg
 import math
 
@@ -26,19 +25,17 @@ class Window:
 		self.threads = int(cfg_render["threads"]) or mp.cpu_count()
 		self.mouselook = True
 
-		# Setup the camera and thread pool that will be used to update this window
-		self.pool = mp.Pool(processes = self.threads)
-		self.cam = cam
-		self.rect = vec2(self.width, self.height)
-		self.rect_win = self.rect * self.scale
-
-		# Configure and start Pygame
+		# Configure Pygame and the main screen as well as the camera and thread pool that will be used to update the window
 		pg.init()
 		pg.display.set_caption("Voxel Tracer")
+		self.rect = vec2(self.width, self.height)
+		self.rect_win = self.rect * self.scale
 		self.screen = pg.display.set_mode(self.rect_win.tuple(), pg.HWSURFACE)
 		self.canvas = pg.Surface(self.rect.tuple(), pg.HWSURFACE)
 		self.font = pg.font.SysFont(None, 24)
 		self.clock = pg.time.Clock()
+		self.pool = mp.Pool(processes = self.threads)
+		self.cam = cam
 		self.running = True
 
 		# Start the main loop

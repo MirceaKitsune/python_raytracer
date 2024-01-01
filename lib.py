@@ -149,10 +149,6 @@ def index_vec2(i: int, width: int):
 def vec2_index(v: vec2, width: int):
 	return int(v.x + v.y * width)
 
-def vec2_neighbors(pos: vec2):
-	# Neighbor order: -x, +x, -y, +y
-	return [pos - vec2(1, 0), pos + vec2(1, 0), pos - vec2(0, 1), pos + vec2(0, 1)]
-
 def index_vec3(i: int, width: int, height: int):
 	z, xy = divmod(i, width * height)
 	y, x = divmod(xy, width)
@@ -160,10 +156,6 @@ def index_vec3(i: int, width: int, height: int):
 
 def vec3_index(v: vec3, width: int, height: int):
 	return int(v.x + v.y * width + v.z * width * height)
-
-def vec3_neighbors(pos: vec3):
-	# Neighbor order: -x, +x, -y, +y, -z, +z
-	return [pos - vec3(1, 0, 0), pos + vec3(1, 0, 0), pos - vec3(0, 1, 0), pos + vec3(0, 1, 0), pos - vec3(0, 0, 1), pos + vec3(0, 0, 1)]
 
 # RGB: Stores color in RGB format, handles conversion between RGB and HEX (eg: "255, 127, 0" = #ff7f00)
 class rgb:

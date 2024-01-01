@@ -1,8 +1,9 @@
 #!/usr/bin/python3
 from lib import *
 
-import copy
 import random
+
+import pygame as pg
 
 # Global container for all objects, accessed by the window and camera
 objects = []
@@ -10,23 +11,31 @@ objects = []
 class Material:
 	def __init__(self, **settings):
 		self.function = "function" in settings and settings["function"] or None
-		self.group = None
-		self.normals = [False] * 6
 		for s in settings:
 			setattr(self, s, settings[s])
-
-	# Check if this material is solid to the given group
-	def in_group(self, group: str):
-		return self.group and group and self.group == group
 
 class Sprite:
 	def __init__(self, **settings):
 		self.size = settings["size"] or vec3(0, 0, 0)
 
-		# The frame list is used to store multiple voxel meshes representing animation frames
+		# Animation properties and the frame list used to store multiple voxel meshes representing animation frames
+		self.frame_start = self.frame_end = self.frame_time = 0
 		self.frames = []
 		for i in range(settings["frames"]):
 			self.clear(i)
+
+	# Set the animation range and speed at which it should be played
+	# If animation time is negative the animation will play backwards
+	def anim_set(self, frame_start: int, frame_end: int, frame_time: float):
+		self.frame_start = min(frame_start, len(self.frames))
+		self.frame_end = min(frame_end, len(self.frames))
+		self.frame_time = frame_time * 1000
+
+	# Returns the animation frame that should currently be displayed based on the time
+	def anim_frame(self):
+		if self.frame_time and len(self.frames) > 1:
+			return int(self.frame_start + (pg.time.get_ticks() // self.frame_time) % (self.frame_end - self.frame_start))
+		return 0
 
 	# Clear all voxels on the given frame, also used to initialize empty frames up to the given frame count
 	def clear(self, frame: int):
@@ -53,7 +62,6 @@ class Sprite:
 				elif angle == 3:
 					pos = vec3((self.size.z - 1) - pos.z, pos.y, pos.x)
 				self.set_voxel(f, pos, voxels[i])
-			self.set_normals(f)
 
 	# Mirror the sprite along the given axes
 	def flip(self, x: bool, y: bool, z: bool):
@@ -69,7 +77,6 @@ class Sprite:
 				if z:
 					pos = vec3(pos.x, pos.y, (self.size.z - 1) - pos.z)
 				self.set_voxel(f, pos, voxels[i])
-			self.set_normals(f)
 
 	# Mix another sprite of the same size into the given sprite, None ignores changes so empty spaces don't override
 	# If the frame count of either sprite is shorter, only the amount of sprites that correspond will be mixed
@@ -85,22 +92,6 @@ class Sprite:
 				if voxels[i]:
 					pos = index_vec3(i, self.size.x, self.size.y)
 					self.set_voxel(f, pos, voxels[i])
-			self.set_normals(f)
-
-	# Update the voxel normals, this should always be ran after making changes to voxels otherwise ray reflections will not be accurate
-	# Normals are stored on the material instance of the voxel, the list describing free or occupied neighbors is in order of: -X, +X, -Y, +Y, -Z, +Z
-	def set_normals(self, frame: int):
-		voxels = self.frames[frame]
-		for i in range(len(voxels)):
-			pos = index_vec3(i, self.size.x, self.size.y)
-			mat = self.get_voxel(frame, pos)
-			if mat:
-				mat.normals = []
-				neighbors = vec3_neighbors(pos)
-				for pos_n in neighbors:
-					mat_n = self.get_voxel(frame, pos_n)
-					mat_n_free = not mat_n or not mat_n.in_group(mat.group)
-					mat.normals.append(mat_n_free and True or False)
 
 	# Add or remove a voxel at a single position, can be None to clear the voxel
 	# Position is local to the object and starts from the minimum corner, each axis should range between 0 and self.size - 1
@@ -111,9 +102,9 @@ class Sprite:
 			return
 
 		voxels = self.frames[frame]
-		i = vec3_index(pos.int(), self.size.x, self.size.y)
+		i = vec3_index(pos, self.size.x, self.size.y)
 		if i < len(voxels):
-			voxels[i] = mat and copy.copy(mat) or None
+			voxels[i] = mat
 
 	# Same as set_voxel but modifies voxels in a cubic area instead of a point
 	def set_voxel_area(self, frame: int, pos_min: vec3, pos_max: vec3, mat: Material):
@@ -124,9 +115,10 @@ class Sprite:
 
 	# Get the voxel at this position, returns the material or None if empty or out of range
 	# Position is in local space, always convert the position to local coordinates before calling this
+	# Frame can be None to retreive the active frame instead of a specific frame, use this when drawing the sprite
 	def get_voxel(self, frame: int, pos: vec3):
-		voxels = self.frames[frame]
-		i = vec3_index(pos.int(), self.size.x, self.size.y)
+		voxels = frame is not None and self.frames[frame] or self.frames[self.anim_frame()]
+		i = vec3_index(pos, self.size.x, self.size.y)
 		if i < len(voxels):
 			return voxels[i]
 		return None
@@ -135,12 +127,12 @@ class Object:
 	def __init__(self, **settings):
 		# pos is the center of the object in world space, dist is size / 2 and represents distance from the origin to each bounding box surface
 		# mins and maxs represent the start and end corners in world space, updated when moving the object to avoid costly checks during ray tracing
-		# When a sprite is set the object is resized to its position and voxels will be fetched from it
+		# When a sprite is set the object is resized to its position and voxels will be fetched from it, setting the sprite to None disables this object
+		# The object holds 4 sprites for every direction angle (0* 90* 180* 270*), the set_sprite function can also take a single sprite to disable rotation
 		self.pos = settings["pos"] or vec3(0, 0, 0)
 		self.size = self.dist = self.mins = self.maxs = vec3(0, 0, 0)
 		self.angle = 0
-		self.sprite = None
-		self.active = True
+		self.sprites = [None] * 4
 		self.move(self.pos)
 		objects.append(self)
 
@@ -178,31 +170,25 @@ class Object:
 		self.maxs = self.pos + self.dist
 
 	# Rotate the angle of object around the Y axis by the provided rotation
-	# Only change sprite rotation if the object faces toward a different 0* / 90* / 180* / 270* direction after the change
 	def rotate(self, angle: float):
-		ang_old = round(self.angle / 90)
-		ang_new = round((self.angle + angle) / 90)
-		ang = (ang_new - ang_old) % 4
 		self.angle = (self.angle + angle) % 360
-		if ang:
-			self.sprite.rotate(ang)
 
-	# Return the voxel at this position on the active sprite
-	def get_voxel(self, pos: vec3):
-		if self.sprite:
-			return self.sprite.get_voxel(0, pos)
-		return None
-
-	# Set a sprite as the active sprite, None removes the sprite from this object
-	# Angle is reset to 0 as every sprite must be rotated together with the object
+	# Set a sprite as the active sprite, None removes the sprite from this object and disables it
+	# If more than one sprite is provided, store up 4 sprites representing object angles
 	# Set the size and bounding box of the object to that of its sprite, or a point if the sprite is disabled
-	def set_sprite(self, spr: Sprite):
-		self.sprite = spr
-		self.angle = 0
-		if self.sprite:
-			self.size = self.sprite.size
+	def set_sprite(self, *sprites):
+		self.size = self.dist = self.mins = self.maxs = vec3(0, 0, 0)
+		for i in range(len(sprites)):
+			self.sprites[i] = sprites[i]
+		if self.sprites[0]:
+			self.size = self.sprites[0].size
 			self.dist = self.size / 2
 			self.mins = self.pos - self.dist
 			self.maxs = self.pos + self.dist
-		else:
-			self.size = self.dist = self.mins = self.maxs = vec3(0, 0, 0)
+
+	# Get the appropriate sprite for this object based on which 0* / 90* / 180* / 270* direction it's facing toward
+	def get_sprite(self):
+		angle = round(self.angle / 90) % 4
+		if self.sprites[angle]:
+			return self.sprites[angle]
+		return self.sprites[0]

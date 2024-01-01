@@ -93,11 +93,19 @@ class Camera:
 			random.seed(i)
 		while ray.step < ray.life:
 			for obj in self.objects:
-				obj_pos = obj.pos_rel(ray.pos)
+				obj_pos = obj.pos_rel(ray.pos.int())
 				if obj_pos:
-					obj_mat = obj.get_voxel(obj_pos)
+					obj_spr = obj.get_sprite()
+					obj_mat = obj_spr.get_voxel(None, obj_pos)
 					if obj_mat:
-						obj_mat.function(ray, obj_mat)
+						obj_mat.function(ray, obj_mat, [
+							obj_spr.get_voxel(None, obj_pos - vec3(1, 0, 0)),
+							obj_spr.get_voxel(None, obj_pos + vec3(1, 0, 0)),
+							obj_spr.get_voxel(None, obj_pos - vec3(0, 1, 0)),
+							obj_spr.get_voxel(None, obj_pos + vec3(0, 1, 0)),
+							obj_spr.get_voxel(None, obj_pos - vec3(0, 0, 1)),
+							obj_spr.get_voxel(None, obj_pos + vec3(0, 0, 1)),
+						])
 
 			# Terminate this ray earlier in some circumstances to improve performance
 			if ray.hits and self.terminate_hits / ray.hits < random.random():
@@ -134,10 +142,10 @@ class Camera:
 		return pg.image.tobytes(srf, "RGBA")
 
 	def pool(self, pool):
-		# Check which objects are active and close enough to the camera to be seen, add valid entries to the local object storage
+		# Only calculate objects that have a sprite and are close enough to the camera to be seen
 		self.objects = []
 		for obj in data.objects:
-			if obj.active and obj.distance(self.pos) <= self.dist_max:
+			if obj.sprites and obj.distance(self.pos) <= self.dist_max:
 				self.objects.append(obj)
 
 		return pool.map(self.draw, range(self.threads))
