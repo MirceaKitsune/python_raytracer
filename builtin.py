@@ -4,7 +4,7 @@ from lib import *
 import data
 
 # Default material function, designed as a simplified PBR shader
-def material(ray, mat, neighbors):
+def material(ray, mat):
 	# Hits: Increase the number of hits based on material ior, glass and fog have a lower probability of terminating rays sooner
 	ray.hits += mat.ior
 
@@ -24,26 +24,7 @@ def material(ray, mat, neighbors):
 
 	# Roughness and translucency:
 	# 1: Velocity is randomized by the roughness value of the interaction, 0 is perfectly sharp while 1 can send the ray in almost any direction
-	# 2: Flip the appropriate axes in the ray velocity based on the normals of the voxel, the flipped velocity is then blended to the old velocity based on ior
-	# 3: Normalize ray velocity after making changes, this ensures the speed of light remains 1 and future voxels aren't skipped or calculated twice
-	# Note: A material only considers its neighbors solid if they have the same IOR otherwise they won't affect the direction of ray reflections
 	ray.vel += vec3(rand(mat.roughness), rand(mat.roughness), rand(mat.roughness))
-	if mat.ior:
-		vel = vec3(ray.vel.x, ray.vel.y, ray.vel.z)
-		if vel.x > 0 and not (neighbors[0] and neighbors[0].ior == mat.ior):
-			vel.x *= -1
-		elif vel.x < 0 and not (neighbors[1] and neighbors[1].ior == mat.ior):
-			vel.x *= -1
-		if vel.y > 0 and not (neighbors[2] and neighbors[2].ior == mat.ior):
-			vel.y *= -1
-		elif vel.y < 0 and not (neighbors[3] and neighbors[3].ior == mat.ior):
-			vel.y *= -1
-		if vel.z > 0 and not (neighbors[4] and neighbors[4].ior == mat.ior):
-			vel.z *= -1
-		elif vel.z < 0 and not (neighbors[5] and neighbors[5].ior == mat.ior):
-			vel.z *= -1
-		ray.vel = ray.vel.mix(vel, mat.ior)
-	ray.vel = ray.vel.normalize()
 
 # Default background function, generates a simple sky
 def material_sky(ray):

@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 from lib import *
 
+import copy
 import random
 
 import pygame as pg
@@ -14,6 +15,10 @@ class Material:
 		for s in settings:
 			setattr(self, s, settings[s])
 
+	# Create a copy of this material that can be edited independently
+	def clone(self):
+		return copy.deepcopy(self)
+
 class Sprite:
 	def __init__(self, **settings):
 		self.size = settings["size"] or vec3(0, 0, 0)
@@ -23,6 +28,10 @@ class Sprite:
 		self.frames = []
 		for i in range(settings["frames"]):
 			self.clear(i)
+
+	# Create a copy of this sprite that can be edited independently
+	def clone(self):
+		return copy.deepcopy(self)
 
 	# Set the animation range and speed at which it should be played
 	# If animation time is negative the animation will play backwards
@@ -36,6 +45,17 @@ class Sprite:
 		if self.frame_time and len(self.frames) > 1:
 			return int(self.frame_start + (pg.time.get_ticks() // self.frame_time) % (self.frame_end - self.frame_start))
 		return 0
+
+	# Get the sprites for all rotations of this sprite based on its original rotation
+	# Storing the result at startup is recommended to avoid costly data duplication at runtime, but the result can be parsed as object.set_sprite(*sprite.get_rotations())
+	def get_rotations(self):
+		spr_90 = self.clone()
+		spr_180 = self.clone()
+		spr_270 = self.clone()
+		spr_90.rotate(1)
+		spr_180.rotate(2)
+		spr_270.rotate(3)
+		return self, spr_90, spr_180, spr_270
 
 	# Clear all voxels on the given frame, also used to initialize empty frames up to the given frame count
 	def clear(self, frame: int):
@@ -136,8 +156,13 @@ class Object:
 		self.move(self.pos)
 		objects.append(self)
 
+	# Disable this object and remove it from the global object list
 	def remove(self):
 		objects.remove(self)
+
+	# Create a copy of this object that can be edited independently
+	def clone(self):
+		return copy.deepcopy(self)
 
 	# Get the distance from the bounding box surface to the given position
 	def distance(self, pos: vec3):

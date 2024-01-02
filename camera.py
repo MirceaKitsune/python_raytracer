@@ -92,20 +92,35 @@ class Camera:
 		if self.static:
 			random.seed(i)
 		while ray.step < ray.life:
+			int_pos = ray.pos.int()
 			for obj in self.objects:
-				obj_pos = obj.pos_rel(ray.pos.int())
+				obj_pos = obj.pos_rel(int_pos)
 				if obj_pos:
 					obj_spr = obj.get_sprite()
 					obj_mat = obj_spr.get_voxel(None, obj_pos)
 					if obj_mat:
-						obj_mat.function(ray, obj_mat, [
-							obj_spr.get_voxel(None, obj_pos - vec3(1, 0, 0)),
-							obj_spr.get_voxel(None, obj_pos + vec3(1, 0, 0)),
-							obj_spr.get_voxel(None, obj_pos - vec3(0, 1, 0)),
-							obj_spr.get_voxel(None, obj_pos + vec3(0, 1, 0)),
-							obj_spr.get_voxel(None, obj_pos - vec3(0, 0, 1)),
-							obj_spr.get_voxel(None, obj_pos + vec3(0, 0, 1)),
-						])
+						# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
+						# A material considers its neighbors solid if they have the same IOR, otherwise they won't affect the direction of ray reflections
+						# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
+						if obj_mat.ior:
+							direction = (obj_mat.ior - 0.5) * 2
+							dir_x = ray.vel.x * direction < 0 and +1 or -1
+							dir_y = ray.vel.y * direction < 0 and +1 or -1
+							dir_z = ray.vel.z * direction < 0 and +1 or -1
+							mat_x = obj_spr.get_voxel(None, obj_pos + vec3(dir_x, 0, 0))
+							mat_y = obj_spr.get_voxel(None, obj_pos + vec3(0, dir_y, 0))
+							mat_z = obj_spr.get_voxel(None, obj_pos + vec3(0, 0, dir_z))
+							if not (mat_x and mat_x.ior == obj_mat.ior):
+								ray.vel.x = mix(+ray.vel.x, -ray.vel.x, obj_mat.ior)
+							if not (mat_y and mat_y.ior == obj_mat.ior):
+								ray.vel.y = mix(+ray.vel.y, -ray.vel.y, obj_mat.ior)
+							if not (mat_z and mat_z.ior == obj_mat.ior):
+								ray.vel.z = mix(+ray.vel.z, -ray.vel.z, obj_mat.ior)
+
+						# Call the material function, normalize ray velocity after making changes to ensure the speed of light remains 1 and future voxels aren't skipped or calculated twice
+						obj_mat.function(ray, obj_mat)
+						ray.vel = ray.vel.normalize()
+						break
 
 			# Terminate this ray earlier in some circumstances to improve performance
 			if ray.hits and self.terminate_hits / ray.hits < random.random():
