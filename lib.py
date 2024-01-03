@@ -4,15 +4,9 @@ import math
 import random
 import configparser
 
-# Load a config and allow fetching a specific section, the default config is loaded implicitly
-class config:
-	def __init__(self, file: str):
-		self.cfg = configparser.RawConfigParser()
-		self.cfg.read(file)
-	def item(self, name: str):
-		return dict(self.cfg.items(name))
-
-cfg = config(len(sys.argv) > 1 and sys.argv[1] or "config.cfg")
+# Load the config, default config is loaded implicitly but a custom one may be parsed as an argument
+cfg = configparser.RawConfigParser()
+cfg.read(len(sys.argv) > 1 and sys.argv[1] or "config.cfg")
 
 # Store: Generic data storage, similar to the Python dictionary but allows getting and setting properties with dots (eg: data.prop instead of data["prop"])
 class store:
@@ -50,17 +44,14 @@ class vec2:
 		else:
 			return vec2(self.x / other, self.y / other)
 
+	def int(self):
+		return vec2(int(self.x), int(self.y))
+
 	def string(self):
 		return str(self.x) + "," + str(self.y)
 
 	def tuple(self):
 		return (self.x, self.y)
-
-	def int(self):
-		return vec2(int(self.x), int(self.y))
-
-	def round(self, digits):
-		return vec2(round(self.x, digits), round(self.y, digits))
 
 	def mix(self, other, bias1):
 		bias2 = 1 - bias1
@@ -103,17 +94,14 @@ class vec3:
 		else:
 			return vec3(self.x / other, self.y / other, self.z / other)
 
+	def int(self):
+		return vec3(int(self.x), int(self.y), int(self.z))
+
 	def string(self):
 		return str(self.x) + "," + str(self.y) + "," + str(self.z)
 
 	def tuple(self):
 		return (self.x, self.y, self.z)
-
-	def int(self):
-		return vec3(int(self.x), int(self.y), int(self.z))
-
-	def round(self, digits):
-		return vec3(round(self.x, digits), round(self.y, digits), round(self.z, digits))
 
 	def mix(self, other, bias1):
 		bias2 = 1 - bias1
@@ -164,15 +152,15 @@ class rgb:
 		self.g = int(g)
 		self.b = int(b)
 
-	def mix(self, col, bias1):
-		bias2 = 1 - bias1
-		return rgb(int(self.r * bias2 + col.r * bias1), int(self.g * bias2 + col.g * bias1), int(self.b * bias2 + col.b * bias1))
-
 	def hex(self):
 		return "%02x" % self.r + "%02x" % self.g + "%02x" % self.b
 
 	def tuple(self):
 		return (self.r, self.g, self.b)
+
+	def mix(self, col, bias1):
+		bias2 = 1 - bias1
+		return rgb(int(self.r * bias2 + col.r * bias1), int(self.g * bias2 + col.g * bias1), int(self.b * bias2 + col.b * bias1))
 
 def hex_to_rgb(s: str):
 	return rgb(int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))

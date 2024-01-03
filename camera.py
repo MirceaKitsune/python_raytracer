@@ -10,49 +10,27 @@ import data
 
 class Camera:
 	def __init__(self, bg: callable):
-		# Read relevant settings
-		cfg_input = cfg.item("INPUT")
-		cfg_window = cfg.item("WINDOW")
-		cfg_render = cfg.item("RENDER")
-		self.max_pitch = float(cfg_input["max_pitch"]) or 0
-		self.width = int(cfg_window["width"]) or 120
-		self.height = int(cfg_window["height"]) or 60
-		self.ambient = float(cfg_render["ambient"]) or 0
-		self.static = int(cfg_render["static"]) or 0
-		self.fov = float(cfg_render["fov"]) or 90
-		self.dof = float(cfg_render["dof"]) or 0
-		self.skip = float(cfg_render["skip"]) or 0
-		self.blur = float(cfg_render["blur"]) or 0
-		self.dist_min = int(cfg_render["dist_min"]) or 0
-		self.dist_max = int(cfg_render["dist_max"]) or 24
-		self.terminate_hits = float(cfg_render["terminate_hits"]) or 0
-		self.terminate_dist = float(cfg_render["terminate_dist"]) or 0
-		self.threads = int(cfg_render["threads"]) or mp.cpu_count()
+		self.width = cfg.getint("WINDOW", "width") or 96
+		self.height = cfg.getint("WINDOW", "height") or 64
+		self.ambient = cfg.getfloat("RENDER", "ambient") or 0
+		self.static = cfg.getboolean("RENDER", "static") or False
+		self.fov = cfg.getfloat("RENDER", "fov") or 90
+		self.dof = cfg.getfloat("RENDER", "dof") or 0
+		self.skip = cfg.getfloat("RENDER", "skip") or 0
+		self.blur = cfg.getfloat("RENDER", "blur") or 0
+		self.dist_min = cfg.getint("RENDER", "dist_min") or 0
+		self.dist_max = cfg.getint("RENDER", "dist_max") or 48
+		self.terminate_hits = cfg.getfloat("RENDER", "terminate_hits") or 0
+		self.terminate_dist = cfg.getfloat("RENDER", "terminate_dist") or 0
+		self.threads = cfg.getint("RENDER", "threads") or mp.cpu_count()
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
 		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
 		self.bg = bg
 		self.objects = []
 
-	def move(self, ofs: vec3):
-		if ofs.x != 0 or ofs.y != 0 or ofs.z != 0:
-			self.pos += ofs
-
-	def rotate(self, rot: vec3):
-		if rot.x != 0 or rot.y != 0 or rot.z != 0:
-			self.rot = self.rot.rotate(rot)
-
-			# Limit camera pitch
-			if self.max_pitch:
-				pitch_min = max(180, 360 - self.max_pitch)
-				pitch_max = min(180, self.max_pitch)
-				if self.rot.y > pitch_max and self.rot.y <= 180:
-					self.rot.y = pitch_max
-				if self.rot.y < pitch_min and self.rot.y > 180:
-					self.rot.y = pitch_min
-
-	def draw_trace(self, i):
-		# Obtain the 2D position of this pixel in the viewport as: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
+	# Obtain the 2D position of this pixel in the viewport as: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
+	def trace(self, i):
 		pos = index_vec2(i, self.width)
 		ofs_x = (-0.5 + pos.x / self.width) * 2
 		ofs_y = (-0.5 + pos.y / self.height) * 2
@@ -92,11 +70,10 @@ class Camera:
 		if self.static:
 			random.seed(i)
 		while ray.step < ray.life:
-			int_pos = ray.pos.int()
 			for obj in self.objects:
-				obj_pos = obj.pos_rel(int_pos)
-				if obj_pos:
+				if obj.intersects(ray.pos, ray.pos):
 					obj_spr = obj.get_sprite()
+					obj_pos = obj.pos_rel(ray.pos.int())
 					obj_mat = obj_spr.get_voxel(None, obj_pos)
 					if obj_mat:
 						# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
@@ -135,9 +112,9 @@ class Camera:
 		self.bg(ray)
 		return ray.col and ray.col.mix(rgb(0, 0, 0), 1 - ray.energy) or None
 
+	# Create a new surface for this thread to paint to, returned to the main thread as a byte string
+	# The alpha channel is used to skip drawing unchanged pixels and apply the blur effect by reducing how much the image blends to the canvas
 	def draw(self, thread):
-		# Create a new surface for this thread to paint to, returned to the main thread as a byte string
-		# The alpha channel is used to skip drawing unchanged pixels and apply the blur effect by reducing how much the image blends to the canvas
 		srf = pg.Surface((self.width, math.ceil(self.height / self.threads)), pg.HWSURFACE + pg.SRCALPHA)
 		alpha = int(self.blur * 255)
 
@@ -149,15 +126,17 @@ class Camera:
 			if index >= self.width * self.height:
 				break
 
-			col = self.draw_trace(index)
+			col = self.trace(index)
 			if col:
 				srf_pos = index_vec2(i, self.width)
 				srf.set_at(srf_pos.tuple(), col.tuple() + (alpha,))
 
 		return pg.image.tobytes(srf, "RGBA")
 
-	def pool(self, pool):
-		# Only calculate objects that have a sprite and are close enough to the camera to be seen
+	# Render a new frame at this position, only calculate objects that have a sprite and are close enough to the camera to be seen
+	def render(self, pos: vec3, rot: vec3, pool):
+		self.pos = pos
+		self.rot = rot
 		self.objects = []
 		for obj in data.objects:
 			if obj.sprites and obj.distance(self.pos) <= self.dist_max:

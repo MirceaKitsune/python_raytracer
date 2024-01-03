@@ -21,7 +21,7 @@ class Material:
 
 class Sprite:
 	def __init__(self, **settings):
-		self.size = settings["size"] or vec3(0, 0, 0)
+		self.size = "size" in settings and settings["size"] or vec3(0, 0, 0)
 
 		# Animation properties and the frame list used to store multiple voxel meshes representing animation frames
 		self.frame_start = self.frame_end = self.frame_time = 0
@@ -123,7 +123,7 @@ class Sprite:
 
 		voxels = self.frames[frame]
 		i = vec3_index(pos, self.size.x, self.size.y)
-		if i < len(voxels):
+		if i >= 0 and i < len(voxels):
 			voxels[i] = mat
 
 	# Same as set_voxel but modifies voxels in a cubic area instead of a point
@@ -139,7 +139,7 @@ class Sprite:
 	def get_voxel(self, frame: int, pos: vec3):
 		voxels = frame is not None and self.frames[frame] or self.frames[self.anim_frame()]
 		i = vec3_index(pos, self.size.x, self.size.y)
-		if i < len(voxels):
+		if i >= 0 and i < len(voxels):
 			return voxels[i]
 		return None
 
@@ -149,9 +149,10 @@ class Object:
 		# mins and maxs represent the start and end corners in world space, updated when moving the object to avoid costly checks during ray tracing
 		# When a sprite is set the object is resized to its position and voxels will be fetched from it, setting the sprite to None disables this object
 		# The object holds 4 sprites for every direction angle (0* 90* 180* 270*), the set_sprite function can also take a single sprite to disable rotation
-		self.pos = settings["pos"] or vec3(0, 0, 0)
+		self.pos = "pos" in settings and settings["pos"] or vec3(0, 0, 0)
+		self.rot = "rot" in settings and settings["rot"] or vec3(0, 0, 0)
+		self.cam_pos = None
 		self.size = self.dist = self.mins = self.maxs = vec3(0, 0, 0)
-		self.angle = 0
 		self.sprites = [None] * 4
 		self.move(self.pos)
 		objects.append(self)
@@ -181,22 +182,26 @@ class Object:
 
 	# Return position relative to the minimum corner, None if the position is outside of object boundaries
 	def pos_rel(self, pos: vec3):
-		pos_rel = self.maxs - pos
-		if pos_rel.x >= 0 and pos_rel.x < self.size.x:
-			if pos_rel.y >= 0 and pos_rel.y < self.size.y:
-				if pos_rel.z >= 0 and pos_rel.z < self.size.z:
-					return pos_rel
-		return None
+		return self.maxs - pos
 
 	# Move this object to a new origin, update mins and maxs to represent the bounding box in space
 	def move(self, pos):
-		self.pos = pos.int()
-		self.mins = self.pos - self.dist
-		self.maxs = self.pos + self.dist
+		if pos.x != 0 or pos.y != 0 or pos.z != 0:
+			self.pos += pos
+			self.mins = self.pos.int() - self.dist
+			self.maxs = self.pos.int() + self.dist
 
-	# Rotate the angle of object around the Y axis by the provided rotation
-	def rotate(self, angle: float):
-		self.angle = (self.angle + angle) % 360
+	# Change the virtual rotation of the object by the given amount, pitch is limited to the provided value
+	def rotate(self, rot: vec3, limit_pitch: float):
+		if rot.x != 0 or rot.y != 0 or rot.z != 0:
+			self.rot = self.rot.rotate(rot)
+			if limit_pitch:
+				pitch_min = max(180, 360 - limit_pitch)
+				pitch_max = min(180, limit_pitch)
+				if self.rot.y > pitch_max and self.rot.y <= 180:
+					self.rot.y = pitch_max
+				if self.rot.y < pitch_min and self.rot.y > 180:
+					self.rot.y = pitch_min
 
 	# Set a sprite as the active sprite, None removes the sprite from this object and disables it
 	# If more than one sprite is provided, store up 4 sprites representing object angles
@@ -208,12 +213,18 @@ class Object:
 		if self.sprites[0]:
 			self.size = self.sprites[0].size
 			self.dist = self.size / 2
-			self.mins = self.pos - self.dist
-			self.maxs = self.pos + self.dist
+			self.mins = self.pos.int() - self.dist
+			self.maxs = self.pos.int() + self.dist
 
 	# Get the appropriate sprite for this object based on which 0* / 90* / 180* / 270* direction it's facing toward
 	def get_sprite(self):
-		angle = round(self.angle / 90) % 4
+		angle = round(self.rot.y / 90) % 4
 		if self.sprites[angle]:
 			return self.sprites[angle]
 		return self.sprites[0]
+
+	# Mark that we want to attach the camera to this object at the provided position offset
+	# The camera can only be attached to one object at a time, this will remove the setting from all other objects
+	def set_camera(self, pos: vec2):
+		for obj in objects:
+			obj.cam_pos = obj == self and pos or None
