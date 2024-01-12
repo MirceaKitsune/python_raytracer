@@ -110,10 +110,10 @@ class vec3:
 	def rotate(self, other):
 		return vec3((self.x + other.x) % 360, (self.y + other.y) % 360, (self.z + other.z) % 360)
 
+	# Directions X and Z are calculated from rotation Z, direction Y is calculated from rotation Y, rotation X is ignored as roll is currently not supported
+	# If normalized X and Z scale with Y to maintain a constant magnitude of the direction vector, desired for camera projection but should be off when calculating movement vectors
+	# X: -1 = Left, +1 = Right. Y: -1 = Down, +1 = Up. Z: -1 = Backward, +1 = Forward.
 	def dir(self, normalize: bool):
-		# Directions X and Z are calculated from rotation Z, direction Y is calculated from rotation Y, rotation X is ignored as roll is currently not supported
-		# If normalized X and Z scale with Y to maintain a constant magnitude of the direction vector, desired for camera projection but should be off when calculating movement vectors
-		# X: -1 = Left, +1 = Right. Y: -1 = Down, +1 = Up. Z: -1 = Backward, +1 = Forward.
 		rad_y = math.radians(self.y)
 		rad_z = math.radians(self.z)
 		dir_x = math.sin(rad_z) * (normalize and math.cos(rad_y) or 1)
@@ -128,7 +128,6 @@ class vec3:
 		return self
 
 # vec2 and vec3 helpers, most notably the conversion function allowing vectors to be converted to and from an integer
-# As ray calculations can be costly, ordered lists are used to store spatial data at integer positions without having to specify a position vector
 # The index of the list item can be used to deduce the position in 2D or 3D space via these functions, eg: index 5 is vec2(1, 1) in a 4 x 4 square
 def index_vec2(i: int, width: int):
 	y, x = divmod(i, width)

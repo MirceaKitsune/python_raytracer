@@ -27,7 +27,7 @@ class Camera:
 		self.rot = vec3(0, 0, 0)
 		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
 		self.bg = bg
-		self.objects = []
+		self.frame = data.Frame()
 
 	# Obtain the 2D position of this pixel in the viewport as: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
 	def trace(self, i):
@@ -70,34 +70,29 @@ class Camera:
 		if self.static:
 			random.seed(i)
 		while ray.step < ray.life:
-			for obj in self.objects:
-				if obj.intersects(ray.pos, ray.pos):
-					obj_spr = obj.get_sprite()
-					obj_pos = obj.pos_rel(ray.pos.int())
-					obj_mat = obj_spr.get_voxel(None, obj_pos)
-					if obj_mat:
-						# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
-						# A material considers its neighbors solid if they have the same IOR, otherwise they won't affect the direction of ray reflections
-						# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
-						if obj_mat.ior:
-							direction = (obj_mat.ior - 0.5) * 2
-							dir_x = ray.vel.x * direction < 0 and +1 or -1
-							dir_y = ray.vel.y * direction < 0 and +1 or -1
-							dir_z = ray.vel.z * direction < 0 and +1 or -1
-							mat_x = obj_spr.get_voxel(None, obj_pos + vec3(dir_x, 0, 0))
-							mat_y = obj_spr.get_voxel(None, obj_pos + vec3(0, dir_y, 0))
-							mat_z = obj_spr.get_voxel(None, obj_pos + vec3(0, 0, dir_z))
-							if not (mat_x and mat_x.ior == obj_mat.ior):
-								ray.vel.x = mix(+ray.vel.x, -ray.vel.x, obj_mat.ior)
-							if not (mat_y and mat_y.ior == obj_mat.ior):
-								ray.vel.y = mix(+ray.vel.y, -ray.vel.y, obj_mat.ior)
-							if not (mat_z and mat_z.ior == obj_mat.ior):
-								ray.vel.z = mix(+ray.vel.z, -ray.vel.z, obj_mat.ior)
+			mat = self.frame.get_at(ray.pos)
+			if mat:
+				# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
+				# A material considers its neighbors solid if they have the same IOR, otherwise they won't affect the direction of ray reflections
+				# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
+				if mat.ior:
+					direction = (mat.ior - 0.5) * 2
+					dir_x = ray.vel.x * direction < 0 and vec3(+1, 0, 0) or vec3(-1, 0, 0)
+					dir_y = ray.vel.y * direction < 0 and vec3(0, +1, 0) or vec3(0, -1, 0)
+					dir_z = ray.vel.z * direction < 0 and vec3(0, 0, +1) or vec3(0, 0, -1)
+					mat_x = self.frame.get_at(ray.pos + dir_x)
+					mat_y = self.frame.get_at(ray.pos + dir_y)
+					mat_z = self.frame.get_at(ray.pos + dir_z)
+					if not (mat_x and mat_x.ior == mat.ior):
+						ray.vel.x = mix(+ray.vel.x, -ray.vel.x, mat.ior)
+					if not (mat_y and mat_y.ior == mat.ior):
+						ray.vel.y = mix(+ray.vel.y, -ray.vel.y, mat.ior)
+					if not (mat_z and mat_z.ior == mat.ior):
+						ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
 
-						# Call the material function, normalize ray velocity after making changes to ensure the speed of light remains 1 and future voxels aren't skipped or calculated twice
-						obj_mat.function(ray, obj_mat)
-						ray.vel = ray.vel.normalize()
-						break
+				# Call the material function, normalize ray velocity after making changes to ensure the speed of light remains 1 and future voxels aren't skipped or calculated twice
+				mat.function(ray, mat)
+				ray.vel = ray.vel.normalize()
 
 			# Terminate this ray earlier in some circumstances to improve performance
 			if ray.hits and self.terminate_hits / ray.hits < random.random():
@@ -134,12 +129,15 @@ class Camera:
 		return pg.image.tobytes(srf, "RGBA")
 
 	# Render a new frame at this position, only calculate objects that have a sprite and are close enough to the camera to be seen
+	# The voxels of valid objects are compiled to a virtual frame local to the camera which is used once per redraw to preform ray tracing
 	def render(self, pos: vec3, rot: vec3, pool):
 		self.pos = pos
 		self.rot = rot
-		self.objects = []
+		self.frame.clear()
 		for obj in data.objects:
-			if obj.sprites and obj.distance(self.pos) <= self.dist_max:
-				self.objects.append(obj)
+			if obj.sprites[0] and obj.distance(self.pos) <= self.dist_max:
+				for pos, item in obj.get_sprite().get_voxels(None):
+					if item:
+						self.frame.set_at(obj.maxs - pos, item)
 
 		return pool.map(self.draw, range(self.threads))

@@ -9,6 +9,7 @@ import pygame as pg
 # Global container for all objects, accessed by the window and camera
 objects = []
 
+# Material: A subset of Frame, used to store the physical properties of a virtual atom
 class Material:
 	def __init__(self, **settings):
 		self.function = "function" in settings and settings["function"] or None
@@ -19,15 +20,61 @@ class Material:
 	def clone(self):
 		return copy.deepcopy(self)
 
+# Frame: A subset of Sprite, stores instances of Material in 3D space for a single model using dictionary stacks of the form [x][y][z] = item
+class Frame:
+	def __init__(self):
+		self.data = {}
+
+	def clear(self):
+		self.data = {}
+
+	def get_items(self):
+		items = []
+		for x in self.data:
+			for y in self.data[x]:
+				for z in self.data[x][y]:
+					items.append((vec3(x, y, z), self.data[x][y][z]))
+		return items
+
+	def get_at(self, pos: vec3):
+		pos_x = int(pos.x)
+		if pos_x in self.data:
+			pos_y = int(pos.y)
+			if pos_y in self.data[pos_x]:
+				pos_z = int(pos.z)
+				if pos_z in self.data[pos_x][pos_y]:
+					return self.data[pos_x][pos_y][pos_z]
+		return None
+
+	# Axis storage is added or removed based on which entries are needed, each stack is deleted if the last entry on that axis has been removed
+	def set_at(self, pos: vec3, mat: Material):
+		pos_x = int(pos.x)
+		pos_y = int(pos.y)
+		pos_z = int(pos.z)
+		if mat:
+			if not pos_x in self.data:
+				self.data[pos_x] = {}
+			if not pos_y in self.data[pos_x]:
+				self.data[pos_x][pos_y] = {}
+			self.data[pos_x][pos_y][pos_z] = mat
+		else:
+			if pos_x in self.data:
+				if not self.data[pos_x]:
+					del self.data[pos_x]
+				elif pos_y in self.data[pos_x]:
+					if not self.data[pos_x][pos_y]:
+						del self.data[pos_x][pos_y]
+					elif pos_z in self.data[pos_x][pos_y]:
+						del self.data[pos_x][pos_y][pos_z]
+
+# Sprite: A subset of Object, stores multiple instances of Frame which can be animated or transformed to produce an usable 3D image
 class Sprite:
 	def __init__(self, **settings):
 		self.size = "size" in settings and settings["size"] or vec3(0, 0, 0)
 
 		# Animation properties and the frame list used to store multiple voxel meshes representing animation frames
 		self.frame_start = self.frame_end = self.frame_time = 0
-		self.frames = []
-		for i in range(settings["frames"]):
-			self.clear(i)
+		self.frames = [Frame()] * settings["frames"]
 
 	# Create a copy of this sprite that can be edited independently
 	def clone(self):
@@ -57,11 +104,10 @@ class Sprite:
 		spr_270.rotate(3)
 		return self, spr_90, spr_180, spr_270
 
-	# Clear all voxels on the given frame, also used to initialize empty frames up to the given frame count
+	# Clear all voxels on the given frame
 	def clear(self, frame: int):
-		while len(self.frames) <= frame:
-			self.frames.append([None] * self.size.x * self.size.y * self.size.z)
-		self.frames[frame] = [None] * self.size.x * self.size.y * self.size.z
+		voxels = self.frames[frame]
+		voxels.clear()
 
 	# Rotate all frames in the sprite around the Y axis at a 90 degree step: 1 = 90*, 2 = 180*, 3 = 270*
 	# This operation is only supported if the X and Z axes of the sprite are equal, voxel meshes with uneven horizontal proportions can't be rotated
@@ -73,30 +119,28 @@ class Sprite:
 		for f in range(len(self.frames)):
 			voxels = self.frames[f]
 			self.clear(f)
-			for i in range(len(voxels)):
-				pos = index_vec3(i, self.size.x, self.size.y)
+			for pos, item in voxels.get_items():
 				if angle == 1:
 					pos = vec3(pos.z, pos.y, (self.size.x - 1) - pos.x)
 				elif angle == 2:
 					pos = vec3((self.size.x - 1) - pos.x, pos.y, (self.size.z - 1) - pos.z)
 				elif angle == 3:
 					pos = vec3((self.size.z - 1) - pos.z, pos.y, pos.x)
-				self.set_voxel(f, pos, voxels[i])
+				self.set_voxel(f, pos, item)
 
 	# Mirror the sprite along the given axes
 	def flip(self, x: bool, y: bool, z: bool):
 		for f in range(len(self.frames)):
 			voxels = self.frames[f]
 			self.clear(f)
-			for i in range(len(voxels)):
-				pos = index_vec3(i, self.size.x, self.size.y)
+			for pos, item in voxels.get_items():
 				if x:
 					pos = vec3((self.size.x - 1) - pos.x, pos.y, pos.z)
 				if y:
 					pos = vec3(pos.x, (self.size.y - 1) - pos.y, pos.z)
 				if z:
 					pos = vec3(pos.x, pos.y, (self.size.z - 1) - pos.z)
-				self.set_voxel(f, pos, voxels[i])
+				self.set_voxel(f, pos, item)
 
 	# Mix another sprite of the same size into the given sprite, None ignores changes so empty spaces don't override
 	# If the frame count of either sprite is shorter, only the amount of sprites that correspond will be mixed
@@ -108,10 +152,9 @@ class Sprite:
 
 		for f in range(min(len(self.frames), len(other.frames))):
 			voxels = other.frames[f]
-			for i in range(len(voxels)):
-				if voxels[i]:
-					pos = index_vec3(i, self.size.x, self.size.y)
-					self.set_voxel(f, pos, voxels[i])
+			for pos, item in voxels.get_items():
+				if item:
+					self.set_voxel(f, pos, item)
 
 	# Add or remove a voxel at a single position, can be None to clear the voxel
 	# Position is local to the object and starts from the minimum corner, each axis should range between 0 and self.size - 1
@@ -122,9 +165,7 @@ class Sprite:
 			return
 
 		voxels = self.frames[frame]
-		i = vec3_index(pos, self.size.x, self.size.y)
-		if i >= 0 and i < len(voxels):
-			voxels[i] = mat
+		voxels.set_at(pos, mat)
 
 	# Same as set_voxel but modifies voxels in a cubic area instead of a point
 	def set_voxel_area(self, frame: int, pos_min: vec3, pos_max: vec3, mat: Material):
@@ -138,11 +179,14 @@ class Sprite:
 	# Frame can be None to retreive the active frame instead of a specific frame, use this when drawing the sprite
 	def get_voxel(self, frame: int, pos: vec3):
 		voxels = frame is not None and self.frames[frame] or self.frames[self.anim_frame()]
-		i = vec3_index(pos, self.size.x, self.size.y)
-		if i >= 0 and i < len(voxels):
-			return voxels[i]
-		return None
+		return voxels.get_at(pos)
 
+	# Return a list of all voxels on the appropriate frame
+	def get_voxels(self, frame: int):
+		voxels = frame is not None and self.frames[frame] or self.frames[self.anim_frame()]
+		return voxels.get_items()
+
+# Object: The base class for objects in the world, uses up to 4 instances of Sprite representing different rotation angles
 class Object:
 	def __init__(self, **settings):
 		# pos is the center of the object in world space, dist is size / 2 and represents distance from the origin to each bounding box surface
