@@ -127,32 +127,12 @@ class vec3:
 			return vec3(self.x, self.y, self.z) / ref
 		return self
 
-# vec2 and vec3 helpers, most notably the conversion function allowing vectors to be converted to and from an integer
-# The index of the list item can be used to deduce the position in 2D or 3D space via these functions, eg: index 5 is vec2(1, 1) in a 4 x 4 square
-def index_vec2(i: int, width: int):
-	y, x = divmod(i, width)
-	return vec2(int(x), int(y))
-
-def vec2_index(v: vec2, width: int):
-	return int(v.x + v.y * width)
-
-def index_vec3(i: int, width: int, height: int):
-	z, xy = divmod(i, width * height)
-	y, x = divmod(xy, width)
-	return vec3(int(x), int(y), int(z))
-
-def vec3_index(v: vec3, width: int, height: int):
-	return int(v.x + v.y * width + v.z * width * height)
-
-# RGB: Stores color in RGB format, handles conversion between RGB and HEX (eg: "255, 127, 0" = #ff7f00)
+# RGB: Stores color in RGB format
 class rgb:
 	def __init__(self, r: int, g: int, b: int):
 		self.r = int(r)
 		self.g = int(g)
 		self.b = int(b)
-
-	def hex(self):
-		return "%02x" % self.r + "%02x" % self.g + "%02x" % self.b
 
 	def tuple(self):
 		return (self.r, self.g, self.b)
@@ -160,9 +140,6 @@ class rgb:
 	def mix(self, col, bias1):
 		bias2 = 1 - bias1
 		return rgb(int(self.r * bias2 + col.r * bias1), int(self.g * bias2 + col.g * bias1), int(self.b * bias2 + col.b * bias1))
-
-def hex_to_rgb(s: str):
-	return rgb(int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
 
 # Random: Returns a random number with an amplitude, eg: 1 can be anything between -1 and +1
 def rand(amp: float):

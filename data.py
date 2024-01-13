@@ -2,12 +2,12 @@
 from lib import *
 
 import copy
-import random
 
 import pygame as pg
 
-# Global container for all objects, accessed by the window and camera
+# Variables for global instances such as objects, accessed by the window and camera
 objects = []
+background = None
 
 # Material: A subset of Frame, used to store the physical properties of a virtual atom
 class Material:
@@ -28,7 +28,7 @@ class Frame:
 	def clear(self):
 		self.data = {}
 
-	def get_items(self):
+	def get_voxels(self):
 		items = []
 		for x in self.data:
 			for y in self.data[x]:
@@ -36,7 +36,7 @@ class Frame:
 					items.append((vec3(x, y, z), self.data[x][y][z]))
 		return items
 
-	def get_at(self, pos: vec3):
+	def get_voxel(self, pos: vec3):
 		pos_x = int(pos.x)
 		if pos_x in self.data:
 			pos_y = int(pos.y)
@@ -47,7 +47,7 @@ class Frame:
 		return None
 
 	# Axis storage is added or removed based on which entries are needed, each stack is deleted if the last entry on that axis has been removed
-	def set_at(self, pos: vec3, mat: Material):
+	def set_voxel(self, pos: vec3, mat: Material):
 		pos_x = int(pos.x)
 		pos_y = int(pos.y)
 		pos_z = int(pos.z)
@@ -74,11 +74,18 @@ class Sprite:
 
 		# Animation properties and the frame list used to store multiple voxel meshes representing animation frames
 		self.frame_start = self.frame_end = self.frame_time = 0
-		self.frames = [Frame()] * settings["frames"]
+		self.frames = []
+		for i in range(settings["frames"]):
+			self.frames.append(Frame())
 
 	# Create a copy of this sprite that can be edited independently
 	def clone(self):
 		return copy.deepcopy(self)
+
+	# Clear all voxels on the given frame
+	def clear(self, frame: int):
+		voxels = self.frames[frame]
+		voxels.clear()
 
 	# Set the animation range and speed at which it should be played
 	# If animation time is negative the animation will play backwards
@@ -104,11 +111,6 @@ class Sprite:
 		spr_270.rotate(3)
 		return self, spr_90, spr_180, spr_270
 
-	# Clear all voxels on the given frame
-	def clear(self, frame: int):
-		voxels = self.frames[frame]
-		voxels.clear()
-
 	# Rotate all frames in the sprite around the Y axis at a 90 degree step: 1 = 90*, 2 = 180*, 3 = 270*
 	# This operation is only supported if the X and Z axes of the sprite are equal, voxel meshes with uneven horizontal proportions can't be rotated
 	def rotate(self, angle: int):
@@ -119,7 +121,7 @@ class Sprite:
 		for f in range(len(self.frames)):
 			voxels = self.frames[f]
 			self.clear(f)
-			for pos, item in voxels.get_items():
+			for pos, item in voxels.get_voxels():
 				if angle == 1:
 					pos = vec3(pos.z, pos.y, (self.size.x - 1) - pos.x)
 				elif angle == 2:
@@ -133,7 +135,7 @@ class Sprite:
 		for f in range(len(self.frames)):
 			voxels = self.frames[f]
 			self.clear(f)
-			for pos, item in voxels.get_items():
+			for pos, item in voxels.get_voxels():
 				if x:
 					pos = vec3((self.size.x - 1) - pos.x, pos.y, pos.z)
 				if y:
@@ -152,7 +154,7 @@ class Sprite:
 
 		for f in range(min(len(self.frames), len(other.frames))):
 			voxels = other.frames[f]
-			for pos, item in voxels.get_items():
+			for pos, item in voxels.get_voxels():
 				if item:
 					self.set_voxel(f, pos, item)
 
@@ -165,7 +167,7 @@ class Sprite:
 			return
 
 		voxels = self.frames[frame]
-		voxels.set_at(pos, mat)
+		voxels.set_voxel(pos, mat)
 
 	# Same as set_voxel but modifies voxels in a cubic area instead of a point
 	def set_voxel_area(self, frame: int, pos_min: vec3, pos_max: vec3, mat: Material):
@@ -179,12 +181,12 @@ class Sprite:
 	# Frame can be None to retreive the active frame instead of a specific frame, use this when drawing the sprite
 	def get_voxel(self, frame: int, pos: vec3):
 		voxels = frame is not None and self.frames[frame] or self.frames[self.anim_frame()]
-		return voxels.get_at(pos)
+		return voxels.get_voxel(pos)
 
 	# Return a list of all voxels on the appropriate frame
 	def get_voxels(self, frame: int):
 		voxels = frame is not None and self.frames[frame] or self.frames[self.anim_frame()]
-		return voxels.get_items()
+		return voxels.get_voxels()
 
 # Object: The base class for objects in the world, uses up to 4 instances of Sprite representing different rotation angles
 class Object:

@@ -4,13 +4,136 @@ from lib import *
 import multiprocessing as mp
 import pygame as pg
 import math
+import random
 
 import builtin
 import data
-import camera
 
+# Camera: A subset of Window which only stores data needed for rendering and is used by threads, preforms ray tracing and draws tiles which are overlayed to the canvas by the main thread
+class Camera:
+	def __init__(self):
+		self.width = cfg.getint("WINDOW", "width") or 96
+		self.height = cfg.getint("WINDOW", "height") or 64
+		self.ambient = cfg.getfloat("RENDER", "ambient") or 0
+		self.static = cfg.getboolean("RENDER", "static") or False
+		self.fov = cfg.getfloat("RENDER", "fov") or 90
+		self.dof = cfg.getfloat("RENDER", "dof") or 0
+		self.skip = cfg.getfloat("RENDER", "skip") or 0
+		self.blur = cfg.getfloat("RENDER", "blur") or 0
+		self.dist_min = cfg.getint("RENDER", "dist_min") or 0
+		self.dist_max = cfg.getint("RENDER", "dist_max") or 48
+		self.terminate_hits = cfg.getfloat("RENDER", "terminate_hits") or 0
+		self.terminate_dist = cfg.getfloat("RENDER", "terminate_dist") or 0
+		self.threads = cfg.getint("RENDER", "threads") or mp.cpu_count()
+		self.pos = vec3(0, 0, 0)
+		self.rot = vec3(0, 0, 0)
+		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
+		self.frame = data.Frame()
+
+	# Trace the pixel based on the given 2D offset which is used to calculate lens distorsion: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
+	def trace(self, ofs_x: float, ofs_y: float):
+		lens_fov = (self.fov + rand(self.dof)) * math.pi / 8
+		lens_x = ofs_x / self.proportions * lens_fov
+		lens_y = ofs_y * self.proportions * lens_fov
+
+		# Randomly offset the ray's angle based on the DOF setting, fetch its direction and use it as the ray velocity
+		# Velocity must be normalized as voxels need to be checked at all integer positions, the speed of light is always 1
+		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
+		ray_rot = self.rot.rotate(vec3(0, -lens_y, +lens_x))
+		ray_dir = ray_rot.dir(True)
+		ray_dir = ray_dir.normalize()
+
+		# Ray data is kept in a data store so it can be easily delivered to material functions and support custom properties
+		ray = store(
+			col = None,
+			absorption = 1,
+			energy = self.ambient,
+			pos = self.pos + ray_dir * self.dist_min,
+			vel = ray_dir,
+			step = 0,
+			life = self.dist_max - self.dist_min,
+			hits = 0,
+		)
+
+		# Each step the ray advances through space by adding its velocity to its position, starting from the minimum distance and going up to the maximum distance
+		# If a material is found, its function is called which can modify any of the ray properties provided
+		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
+		# Optionally the random seed is set to the index of the pixel so random noise in ray calculations cam be static instead of flickering
+		if self.static:
+			random.seed(round((1 + ofs_x * self.width) * (1 + ofs_y * self.height)))
+		while ray.step < ray.life:
+			mat = self.frame.get_voxel(ray.pos)
+			if mat:
+				# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
+				# A material considers its neighbors solid if they have the same IOR, otherwise they won't affect the direction of ray reflections
+				# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
+				if mat.ior:
+					direction = (mat.ior - 0.5) * 2
+					dir_x = ray.vel.x * direction < 0 and vec3(+1, 0, 0) or vec3(-1, 0, 0)
+					dir_y = ray.vel.y * direction < 0 and vec3(0, +1, 0) or vec3(0, -1, 0)
+					dir_z = ray.vel.z * direction < 0 and vec3(0, 0, +1) or vec3(0, 0, -1)
+					mat_x = self.frame.get_voxel(ray.pos + dir_x)
+					mat_y = self.frame.get_voxel(ray.pos + dir_y)
+					mat_z = self.frame.get_voxel(ray.pos + dir_z)
+					if not (mat_x and mat_x.ior == mat.ior):
+						ray.vel.x = mix(+ray.vel.x, -ray.vel.x, mat.ior)
+					if not (mat_y and mat_y.ior == mat.ior):
+						ray.vel.y = mix(+ray.vel.y, -ray.vel.y, mat.ior)
+					if not (mat_z and mat_z.ior == mat.ior):
+						ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
+
+				# Call the material function, normalize ray velocity after making changes to ensure the speed of light remains 1 and future voxels aren't skipped or calculated twice
+				mat.function(ray, mat)
+				ray.vel = ray.vel.normalize()
+
+			# Terminate this ray earlier in some circumstances to improve performance
+			if ray.hits and self.terminate_hits / ray.hits < random.random():
+				break
+			elif ray.step / ray.life > 1 - self.terminate_dist * random.random():
+				break
+			ray.step += 1
+			ray.pos += ray.vel
+		random.seed(None)
+
+		# Once ray calculations are done, run the background function and return the resulting color
+		if data.background:
+			data.background(ray)
+		return ray.col and ray.col.mix(rgb(0, 0, 0), 1 - ray.energy) or None
+
+	# Called by threads with a thread ID indicating the tile number, creates a new surface for this thread to paint to which is returned to the main thread as a byte string
+	# The alpha channel is used to skip drawing unchanged pixels and apply the blur effect by reducing how much pixels on the image are blended to the canvas
+	# Pixel recalculation is probabilistically skipped for pixels closer to the screen edge to improve performance at the cost of some grain
+	def draw(self, thread):
+		srf = pg.Surface((self.width, math.ceil(self.height / self.threads)), pg.HWSURFACE + pg.SRCALPHA)
+		alpha = int(self.blur * 255)
+		lines = math.ceil(self.height / self.threads)
+		for x in range(self.width):
+			for y in range(lines):
+				y_line = y + lines * thread
+				ofs_x = (-0.5 + x / self.width) * 2
+				ofs_y = (-0.5 + y_line / self.height) * 2
+				if max(abs(ofs_x), abs(ofs_y)) * self.skip < random.random():
+					col = self.trace(ofs_x, ofs_y)
+					if col:
+						srf.set_at((x, y), col.tuple() + (alpha,))
+
+		return pg.image.tobytes(srf, "RGBA")
+
+	# Update the position and rotation this camera will shoot rays from
+	# The voxels of valid objects within range are compiled to a virtual frame local to the camera, which is used once per redraw to preform ray tracing
+	def move(self, pos: vec3, rot: vec3):
+		self.pos = pos
+		self.rot = rot
+		self.frame.clear()
+		for obj in data.objects:
+			if obj.sprites[0] and obj.distance(self.pos) <= self.dist_max:
+				for pos, item in obj.get_sprite().get_voxels(None):
+					if item:
+						self.frame.set_voxel(obj.maxs - pos, item)
+
+# Window: Initializes Pygame and starts the main loop, handles all updates and redraws the canvas using a Camera instance
 class Window:
-	def __init__(self, cam: camera.Camera):
+	def __init__(self):
 		self.width = cfg.getint("WINDOW", "width") or 96
 		self.height = cfg.getint("WINDOW", "height") or 64
 		self.scale = cfg.getint("WINDOW", "scale") or 8
@@ -32,7 +155,7 @@ class Window:
 		self.font = pg.font.SysFont(None, 24)
 		self.clock = pg.time.Clock()
 		self.pool = mp.Pool(processes = self.threads)
-		self.cam = cam
+		self.cam = Camera()
 		self.running = True
 
 		# Main loop, limited by FPS with a slower clock when the window isn't focused
@@ -56,7 +179,8 @@ class Window:
 
 		# Render: Request the camera to draw new tiles, add the image of each tile to the canvas at its correct position once all segments have been received
 		tiles = []
-		result = self.cam.render(obj.pos + vec3(obj.cam_pos.x * d.x, obj.cam_pos.y, obj.cam_pos.x * d.z), obj.rot, self.pool)
+		self.cam.move(obj.pos + vec3(obj.cam_pos.x * d.x, obj.cam_pos.y, obj.cam_pos.x * d.z), obj.rot)
+		result = self.pool.map(self.cam.draw, range(self.threads))
 		for i in range(len(result)):
 			srf = pg.image.frombytes(result[i], (self.width, math.ceil(self.height / self.threads)), "RGBA")
 			tiles.append((srf, (0, math.ceil(self.height / self.threads) * i)))
@@ -117,7 +241,6 @@ class Window:
 		if keys[pg.K_RIGHT]:
 			obj.rotate(vec3(0, 0, +5) * units, self.max_pitch)
 
-# Create the camera and main window to start Pygame
+# Load the default world and create the main window
 builtin.world()
-cam = camera.Camera(builtin.material_sky)
-win = Window(cam)
+win = Window()
