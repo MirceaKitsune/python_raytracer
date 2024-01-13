@@ -38,7 +38,8 @@ Settings are stored within the `config.cfg` file and can be used to modify how t
     - `fps`: Target number of frames per second, the end result may be lower or higher based on practical performance. FPS will be lowered when the window is not focused.
   - `RENDER`: Renderer related settings used by the camera.
     - `ambient`: Ambient light intensity, light rays start with this amount of energy.
-    - `static`: Whether to use the pixel index as random noise seed and have a static pattern, alternative to using random noise each frame which produces flickering. Only affects material functions, effects such as DOF will still be dynamic.
+    - `static`: Whether to use the pixel index as random noise seed and have a static pattern, alternative to using random noise each frame which produces flickering. Affects material functions and camera effects such as DOF, pixel skipping is not affected and remains random.
+    - `samples`: Values higher than 1 enable multisampling, which looks softer and reduces roughness by doing multiple traces per pixel. This setting has an extreme performance impact and will greatly reduce FPS!
     - `fov`: Field of view in degrees, higher values make the viewport wider.
     - `dof`: Depth of field in degrees, higher values result in more randomness added to the initial ray velocity and distance blur.
     - `skip`: Pixels that are closer to the edge of the screen have a random chance of not being recalculated each frame. Improves performance at the cost of increased grain in the corners of the viewport where pixels may take a few frames to update.

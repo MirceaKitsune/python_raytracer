@@ -16,6 +16,7 @@ class Camera:
 		self.height = cfg.getint("WINDOW", "height") or 64
 		self.ambient = cfg.getfloat("RENDER", "ambient") or 0
 		self.static = cfg.getboolean("RENDER", "static") or False
+		self.samples = cfg.getint("RENDER", "samples") or 1
 		self.fov = cfg.getfloat("RENDER", "fov") or 90
 		self.dof = cfg.getfloat("RENDER", "dof") or 0
 		self.skip = cfg.getfloat("RENDER", "skip") or 0
@@ -58,9 +59,6 @@ class Camera:
 		# Each step the ray advances through space by adding its velocity to its position, starting from the minimum distance and going up to the maximum distance
 		# If a material is found, its function is called which can modify any of the ray properties provided
 		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
-		# Optionally the random seed is set to the index of the pixel so random noise in ray calculations cam be static instead of flickering
-		if self.static:
-			random.seed(round((1 + ofs_x * self.width) * (1 + ofs_y * self.height)))
 		while ray.step < ray.life:
 			mat = self.frame.get_voxel(ray.pos)
 			if mat:
@@ -93,7 +91,6 @@ class Camera:
 				break
 			ray.step += 1
 			ray.pos += ray.vel
-		random.seed(None)
 
 		# Once ray calculations are done, run the background function and return the resulting color
 		if data.background:
@@ -103,6 +100,7 @@ class Camera:
 	# Called by threads with a thread ID indicating the tile number, creates a new surface for this thread to paint to which is returned to the main thread as a byte string
 	# The alpha channel is used to skip drawing unchanged pixels and apply the blur effect by reducing how much pixels on the image are blended to the canvas
 	# Pixel recalculation is probabilistically skipped for pixels closer to the screen edge to improve performance at the cost of some grain
+	# Optionally the random seed is set to the index of the pixel so random noise in ray calculations cam be static instead of flickering
 	def draw(self, thread):
 		srf = pg.Surface((self.width, math.ceil(self.height / self.threads)), pg.HWSURFACE + pg.SRCALPHA)
 		alpha = int(self.blur * 255)
@@ -113,7 +111,15 @@ class Camera:
 				ofs_x = (-0.5 + x / self.width) * 2
 				ofs_y = (-0.5 + y_line / self.height) * 2
 				if max(abs(ofs_x), abs(ofs_y)) * self.skip < random.random():
-					col = self.trace(ofs_x, ofs_y)
+					col = None
+					for i in range(self.samples):
+						if self.static:
+							random.seed(round((1 + ofs_x * self.width) * (1 + ofs_y * self.height) * (1 + i)))
+						col_sample = self.trace(ofs_x, ofs_y)
+						random.seed(None)
+
+						if col_sample:
+							col = col and col.mix(col_sample, 0.5) or col_sample
 					if col:
 						srf.set_at((x, y), col.tuple() + (alpha,))
 
