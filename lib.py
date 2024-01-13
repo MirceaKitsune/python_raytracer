@@ -45,10 +45,19 @@ class vec2:
 			return vec2(self.x / other, self.y / other)
 
 	def int(self):
-		return vec2(int(self.x), int(self.y))
+		return vec2(math.trunc(self.x), math.trunc(self.y))
 
 	def string(self):
 		return str(self.x) + "," + str(self.y)
+
+	def array(self):
+		return [self.x, self.y]
+
+	def min(self):
+		return min(self.x, self.y)
+
+	def max(self):
+		return max(self.x, self.y)
 
 	def tuple(self):
 		return (self.x, self.y)
@@ -95,10 +104,19 @@ class vec3:
 			return vec3(self.x / other, self.y / other, self.z / other)
 
 	def int(self):
-		return vec3(int(self.x), int(self.y), int(self.z))
+		return vec3(math.trunc(self.x), math.trunc(self.y), math.trunc(self.z))
 
 	def string(self):
 		return str(self.x) + "," + str(self.y) + "," + str(self.z)
+
+	def array(self):
+		return [self.x, self.y, self.z]
+
+	def min(self):
+		return min(self.x, self.y, self.z)
+
+	def max(self):
+		return max(self.x, self.y, self.z)
 
 	def tuple(self):
 		return (self.x, self.y, self.z)
@@ -130,16 +148,19 @@ class vec3:
 # RGB: Stores color in RGB format
 class rgb:
 	def __init__(self, r: int, g: int, b: int):
-		self.r = int(r)
-		self.g = int(g)
-		self.b = int(b)
+		self.r = r
+		self.g = g
+		self.b = b
+
+	def array(self):
+		return [self.r, self.g, self.b]
 
 	def tuple(self):
 		return (self.r, self.g, self.b)
 
 	def mix(self, col, bias1):
 		bias2 = 1 - bias1
-		return rgb(int(self.r * bias2 + col.r * bias1), int(self.g * bias2 + col.g * bias1), int(self.b * bias2 + col.b * bias1))
+		return rgb(round(self.r * bias2 + col.r * bias1), round(self.g * bias2 + col.g * bias1), round(self.b * bias2 + col.b * bias1))
 
 # Random: Returns a random number with an amplitude, eg: 1 can be anything between -1 and +1
 def rand(amp: float):

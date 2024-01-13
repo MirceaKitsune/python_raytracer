@@ -2,6 +2,7 @@
 from lib import *
 
 import copy
+import math
 
 import pygame as pg
 
@@ -37,20 +38,20 @@ class Frame:
 		return items
 
 	def get_voxel(self, pos: vec3):
-		pos_x = int(pos.x)
+		pos_x = math.trunc(pos.x)
 		if pos_x in self.data:
-			pos_y = int(pos.y)
+			pos_y = math.trunc(pos.y)
 			if pos_y in self.data[pos_x]:
-				pos_z = int(pos.z)
+				pos_z = math.trunc(pos.z)
 				if pos_z in self.data[pos_x][pos_y]:
 					return self.data[pos_x][pos_y][pos_z]
 		return None
 
 	# Axis storage is added or removed based on which entries are needed, each stack is deleted if the last entry on that axis has been removed
 	def set_voxel(self, pos: vec3, mat: Material):
-		pos_x = int(pos.x)
-		pos_y = int(pos.y)
-		pos_z = int(pos.z)
+		pos_x = math.trunc(pos.x)
+		pos_y = math.trunc(pos.y)
+		pos_z = math.trunc(pos.z)
 		if mat:
 			if not pos_x in self.data:
 				self.data[pos_x] = {}
@@ -97,7 +98,7 @@ class Sprite:
 	# Returns the animation frame that should currently be displayed based on the time
 	def anim_frame(self):
 		if self.frame_time and len(self.frames) > 1:
-			return int(self.frame_start + (pg.time.get_ticks() // self.frame_time) % (self.frame_end - self.frame_start))
+			return math.trunc(self.frame_start + (pg.time.get_ticks() // self.frame_time) % (self.frame_end - self.frame_start))
 		return 0
 
 	# Get the sprites for all rotations of this sprite based on its original rotation
@@ -171,9 +172,9 @@ class Sprite:
 
 	# Same as set_voxel but modifies voxels in a cubic area instead of a point
 	def set_voxel_area(self, frame: int, pos_min: vec3, pos_max: vec3, mat: Material):
-		for x in range(int(pos_min.x), int(pos_max.x + 1)):
-			for y in range(int(pos_min.y), int(pos_max.y + 1)):
-				for z in range(int(pos_min.z), int(pos_max.z + 1)):
+		for x in range(math.trunc(pos_min.x), math.trunc(pos_max.x + 1)):
+			for y in range(math.trunc(pos_min.y), math.trunc(pos_max.y + 1)):
+				for z in range(math.trunc(pos_min.z), math.trunc(pos_max.z + 1)):
 					self.set_voxel(frame, vec3(x, y, z), mat)
 
 	# Get the voxel at this position, returns the material or None if empty or out of range
@@ -191,14 +192,14 @@ class Sprite:
 # Object: The base class for objects in the world, uses up to 4 instances of Sprite representing different rotation angles
 class Object:
 	def __init__(self, **settings):
-		# pos is the center of the object in world space, dist is size / 2 and represents distance from the origin to each bounding box surface
+		# pos is the center of the object in world space, size is half of the active sprite size and represents distance from the origin to each bounding box surface
 		# mins and maxs represent the start and end corners in world space, updated when moving the object to avoid costly checks during ray tracing
 		# When a sprite is set the object is resized to its position and voxels will be fetched from it, setting the sprite to None disables this object
 		# The object holds 4 sprites for every direction angle (0* 90* 180* 270*), the set_sprite function can also take a single sprite to disable rotation
 		self.pos = "pos" in settings and settings["pos"] or vec3(0, 0, 0)
 		self.rot = "rot" in settings and settings["rot"] or vec3(0, 0, 0)
 		self.cam_pos = None
-		self.size = self.dist = self.mins = self.maxs = vec3(0, 0, 0)
+		self.size = self.mins = self.maxs = vec3(0, 0, 0)
 		self.sprites = [None] * 4
 		self.move(self.pos)
 		objects.append(self)
@@ -211,13 +212,6 @@ class Object:
 	def clone(self):
 		return copy.deepcopy(self)
 
-	# Get the distance from the bounding box surface to the given position
-	def distance(self, pos: vec3):
-		x = max(0, abs(self.pos.x - pos.x) - self.dist.x)
-		y = max(0, abs(self.pos.y - pos.y) - self.dist.y)
-		z = max(0, abs(self.pos.z - pos.z) - self.dist.z)
-		return max(x, y, z)
-
 	# Check whether another item intersects the bounding box of this object, pos_min and pos_max represent the corners of another box or a point if identical
 	def intersects(self, pos_min: vec3, pos_max: vec3):
 		if pos_min.x < self.maxs.x + 1 and pos_max.x > self.mins.x:
@@ -226,16 +220,12 @@ class Object:
 					return True
 		return False
 
-	# Return position relative to the minimum corner, None if the position is outside of object boundaries
-	def pos_rel(self, pos: vec3):
-		return self.maxs - pos
-
 	# Move this object to a new origin, update mins and maxs to represent the bounding box in space
 	def move(self, pos):
 		if pos.x != 0 or pos.y != 0 or pos.z != 0:
 			self.pos += pos
-			self.mins = self.pos.int() - self.dist
-			self.maxs = self.pos.int() + self.dist
+			self.mins = self.pos.int() - self.size
+			self.maxs = self.pos.int() + self.size
 
 	# Change the virtual rotation of the object by the given amount, pitch is limited to the provided value
 	def rotate(self, rot: vec3, limit_pitch: float):
@@ -253,14 +243,13 @@ class Object:
 	# If more than one sprite is provided, store up 4 sprites representing object angles
 	# Set the size and bounding box of the object to that of its sprite, or a point if the sprite is disabled
 	def set_sprite(self, *sprites):
-		self.size = self.dist = self.mins = self.maxs = vec3(0, 0, 0)
+		self.size = self.mins = self.maxs = vec3(0, 0, 0)
 		for i in range(len(sprites)):
 			self.sprites[i] = sprites[i]
 		if self.sprites[0]:
-			self.size = self.sprites[0].size
-			self.dist = self.size / 2
-			self.mins = self.pos.int() - self.dist
-			self.maxs = self.pos.int() + self.dist
+			self.size = self.sprites[0].size / 2
+			self.mins = self.pos.int() - self.size
+			self.maxs = self.pos.int() + self.size
 
 	# Get the appropriate sprite for this object based on which 0* / 90* / 180* / 270* direction it's facing toward
 	def get_sprite(self):
