@@ -141,10 +141,10 @@ class Camera:
 		self.frame.clear()
 		for obj in data.objects:
 			if obj.sprites[0] and math.dist(obj.pos.array(), self.pos.array()) <= self.dist_max + obj.size.max():
-				for pos, item in obj.get_sprite().get_voxels(None):
+				for pos, mat in obj.get_sprite().get_voxels(None):
 					pos_world = obj.maxs - pos
-					if item and math.dist(pos_world.array(), self.pos.array()) <= self.dist_max:
-						self.frame.set_voxel(pos_world, item)
+					if mat and math.dist(pos_world.array(), self.pos.array()) <= self.dist_max:
+						self.frame.set_voxel(pos_world, mat)
 
 # Window: Initializes Pygame and starts the main loop, handles all updates and redraws the canvas using a Camera instance
 class Window:
@@ -178,7 +178,7 @@ class Window:
 			for obj in data.objects:
 				if obj.cam_pos:
 					self.update(obj)
-					break
+				obj.unstick()
 
 			fps = pg.mouse.get_focused() and self.fps or math.trunc(self.fps / 5)
 			self.clock.tick(fps)

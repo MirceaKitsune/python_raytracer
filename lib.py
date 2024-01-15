@@ -44,11 +44,47 @@ class vec2:
 		else:
 			return vec2(self.x / other, self.y / other)
 
+	def __eq__(self, other):
+		if isinstance(other, vec2):
+			return self.x == other.x and self.y == other.y
+		else:
+			return self.x == other and self.y == other
+
+	def __ne__(self, other):
+		if isinstance(other, vec2):
+			return self.x != other.x or self.y != other.y
+		else:
+			return self.x != other or self.y != other
+
+	def __lt__(self, other):
+		if isinstance(other, vec2):
+			return self.x < other.x and self.y < other.y
+		else:
+			return self.x < other and self.y < other
+
+	def __le__(self, other):
+		if isinstance(other, vec2):
+			return self.x <= other.x and self.y <= other.y
+		else:
+			return self.x <= other and self.y <= other
+
+	def __gt__(self, other):
+		if isinstance(other, vec2):
+			return self.x > other.x and self.y > other.y
+		else:
+			return self.x > other and self.y > other
+
+	def __ge__(self, other):
+		if isinstance(other, vec2):
+			return self.x >= other.x and self.y >= other.y
+		else:
+			return self.x >= other and self.y >= other
+
+	def __str__(self):
+		return str(self.x) + "," + str(self.y)
+
 	def int(self):
 		return vec2(math.trunc(self.x), math.trunc(self.y))
-
-	def string(self):
-		return str(self.x) + "," + str(self.y)
 
 	def array(self):
 		return [self.x, self.y]
@@ -103,11 +139,47 @@ class vec3:
 		else:
 			return vec3(self.x / other, self.y / other, self.z / other)
 
+	def __eq__(self, other):
+		if isinstance(other, vec3):
+			return self.x == other.x and self.y == other.y and self.z == other.z
+		else:
+			return self.x == other and self.y == other and self.z == other
+
+	def __ne__(self, other):
+		if isinstance(other, vec3):
+			return self.x != other.x or self.y != other.y or self.z != other.z
+		else:
+			return self.x != other or self.y != other or self.z != other
+
+	def __lt__(self, other):
+		if isinstance(other, vec3):
+			return self.x < other.x and self.y < other.y and self.z < other.z
+		else:
+			return self.x < other and self.y < other and self.z < other
+
+	def __le__(self, other):
+		if isinstance(other, vec3):
+			return self.x <= other.x and self.y <= other.y and self.z <= other.z
+		else:
+			return self.x <= other and self.y <= other and self.z <= other
+
+	def __gt__(self, other):
+		if isinstance(other, vec3):
+			return self.x > other.x and self.y > other.y and self.z > other.z
+		else:
+			return self.x > other and self.y > other and self.z > other
+
+	def __ge__(self, other):
+		if isinstance(other, vec3):
+			return self.x >= other.x and self.y >= other.y and self.z >= other.z
+		else:
+			return self.x >= other and self.y >= other and self.z >= other
+
+	def __str__(self):
+		return str(self.x) + "," + str(self.y) + "," + str(self.z)
+
 	def int(self):
 		return vec3(math.trunc(self.x), math.trunc(self.y), math.trunc(self.z))
-
-	def string(self):
-		return str(self.x) + "," + str(self.y) + "," + str(self.z)
 
 	def array(self):
 		return [self.x, self.y, self.z]
