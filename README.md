@@ -16,19 +16,22 @@ The code is under the GPL license, created and developed by MirceaKitsune. Execu
 
   - [x] Programmable material functions. Each voxel can hold both unique material properties as well as a function that tells light rays how to behave upon collision.
   - [x] Simplified physically accurate material provided by default. Simulates all basic PBR features such as: Accurate reflections and refractions with roughness, plasticity and metalicity with accurate interactions, translucency and anisotropy with IOR support, density for volumetrics, emission via a ray energy system which supports ambient and sky lighting.
+  - [x] Basic physics system with support for interactions between voxel meshes, velocity is gradually applied in integer steps to guarantee objects are properly aligned.
   - [ ] Support cammera rolling if this becomes possible. Current vector math doesn't support a third axis of transformation, you can only look horizontally and vertically.
   - [ ] Add perlin noise. May be possible to support an object based chunk system for generating infinite terrain.
   - [ ] Create a script to convert image slices into pixel meshes. This will allow importing 3D sprites from 2D images.
-  - [ ] Support object movement and a basic physics system. Objects can only move at integer positions, collisions will be checked by finding intersecting voxels. May require a separate thread pool.
   - [ ] Sound support in the form of either audio files or a frequency generator associated with materials. Audio is also intended to be raytraced.
 
 ## Settings
 
 Settings are stored within the `config.cfg` file and can be used to modify how the engine behaves. A custom config can be used by parsing it as an argument to the main script on launch, eg: `init.py my_config.cfg`. Below is a description of each category and setting:
 
-  - `INPUT`: Input related settings for keyboard and mouse.
-    - `speed_move`: Keyboard movement speed, determines how fast the camera moves when using the movement keys.
-    - `speed_mouse`: Mouse rotation speed, determines how fast the camera rotates when moving the mouse in mouselook mode.
+  - `PHYSICS`: Physics related settings including player movement.
+    - `gravity`: Global gravity setting, this amount of velocity is added on the -Y axis.
+    - `friction`: Global air resistance, physical objects lose velocity by this amount.
+    - `speed_jump`: Jump speed of the player, determines how fast the player moves vertically.
+    - `speed_move`: Keyboard movement speed of the player, determines how fast the camera moves when using the movement keys.
+    - `speed_mouse`: Mouse rotation speed of the player, determines how fast the camera rotates when moving the mouse in mouselook mode.
     - `max_pitch`: Maximum pitch angle in degrees, the camera can't look lower or higher than this amount. 0 disables, use a value below 180, 90 is recommended.
   - `WINDOW`: Window related settings such as resolution and frame rate.
     - `width`: Number of horizontal pixels, higher values allow more detail but greatly affect performance.
@@ -60,7 +63,7 @@ A material is registered using the register_material call with a list of setting
   - `absorption`: The ability of this material to absorb color, 0 acts as a perfect mirror while 1 is a perfect absorbant. Controls both transparency and metalicity: Use with an `ior` under 0.5 to get a transparent surface and over 0.5 for a metallic one. If solid use 1 for plastic, 0.5 for metal, 0 for a mirror... if transparent try 1 for painted glass or 0.25 for fog.
   - `ior`: Amount by which light rays are reflected by or pass through the surface. This isn't an accurate IOR value and named that way for familiarity, it multiplies how much the ray is reflected and acts as the real controller for determining translucency. If the material represents an opaque surface this should be 1 for accurate ray bounces, lower slightly to simulate anisotropy... a value close to 0.5 can be used to send rays inward and encourage subsurface scattering... if transparent it should be well below 0.5 to send light rays through, use a low value to simulate IOR or 0 to leave ray velocity unchanged.
   - `energy`: How much energy this material emits. Use 0 for normal surfaces and increase for voxels that emit light. A flame should be roughly 0.25, a standard light bulb 0.5 or lower, the sun should be 1.
-  - `solid`: Physics property. If true this voxel collides with voxels in other objects.
+  - `solid`: Physics property. If true this voxel is checked during physics interactions and collides with voxels in other objects.
 
 Note: The number of hits accounted for by the raytracer increases with `ior`, a value of 0 doesn't count as a hit while 1 is a full hit. Low reflectivity reduces bounce based ray termination controlled by the `terminate_hits` setting, making rays live longer which may degrade performance if a ray gets stuck bouncing inside a solid. An `ior` of 0 can be used to make volumetric fog, but since fog voxels are processed without reducing ray life this should be done sparingly to avoid performance loss.
 
@@ -117,3 +120,5 @@ Below is a list of functions built into each class which are likely to be used w
   - `object.set_camera`: Used to bind the camera and input to an object, takes a `vec2` used to indicate the camera offset. This effectively marks the object as the active player: Must be executed on at least one object for rendering and input to work! Only one object at a time may act as the player.
 
 Note: The size of a sprite needs to be an even integer for each direction otherwise slices located on edges may be ignored. For instance `6 4 12` is a valid sprite size, however `7 4 12` is invalid and will be automatically enlarged to `8 4 12`. This is due to voxels being located at integer positions while the center of each objects is always in the middle, size must therefore be equally divisible by two to ensure voxels are never 0.5 units away from the object center.
+
+Physics: To make an object physical, give it the `actor` property on init such as `data.Object(pos = vec3(0, 0, 0), actor = True)`. Only do this for objects intended to move, all actors are affected by gravity and subject to processing by the physics engine.

@@ -204,11 +204,13 @@ class Object:
 		# The object holds 4 sprites for every direction angle (0* 90* 180* 270*), the set_sprite function can also take a single sprite to disable rotation
 		self.pos = "pos" in settings and settings["pos"] or vec3(0, 0, 0)
 		self.rot = "rot" in settings and settings["rot"] or vec3(0, 0, 0)
-		self.physics = "physics" in settings and settings["physics"] or False
+		self.vel = "vel" in settings and settings["vel"] or vec3(0, 0, 0)
+		self.actor = "actor" in settings and settings["actor"] or False
 
-		self.cam_pos = None
+		self.vel_step = vec3(0, 0, 0)
 		self.size = self.mins = self.maxs = vec3(0, 0, 0)
 		self.sprites = [None] * 4
+		self.cam_pos = None
 		self.move(self.pos)
 		objects.append(self)
 
@@ -224,13 +226,6 @@ class Object:
 	def intersects(self, pos_min: vec3, pos_max: vec3):
 		return pos_min < self.maxs + 1 and pos_max > self.mins
 
-	# Move this object to a new origin, update mins and maxs to represent the bounding box in space
-	def move(self, pos):
-		if pos.x != 0 or pos.y != 0 or pos.z != 0:
-			self.pos += pos
-			self.mins = self.pos.int() - self.size
-			self.maxs = self.pos.int() + self.size
-
 	# Change the virtual rotation of the object by the given amount, pitch is limited to the provided value
 	def rotate(self, rot: vec3, limit_pitch: float):
 		if rot.x != 0 or rot.y != 0 or rot.z != 0:
@@ -243,53 +238,67 @@ class Object:
 				if self.rot.y < pitch_min and self.rot.y > 180:
 					self.rot.y = pitch_min
 
-	# Physics function, detects collisions with other objects and moves this object to the nearest empty space if one is available
-	def unstick(self):
-		if self.physics and self.sprites[0]:
-			# Store the world positions of solid voxels in this object
-			points_self = []
-			for pos, mat in self.get_sprite().get_voxels(None):
-				if mat and mat.solid:
-					pos_world = self.maxs - pos
-					points_self.append(pos_world)
+	# Teleport the object to this origin, use only when necessary and prefer impulse instead
+	def move(self, pos):
+		self.pos = math.trunc(pos)
+		self.mins = self.pos - self.size
+		self.maxs = self.pos + self.size
 
-			# Store the world positions of solid voxels in other objects that intersect self's bounding box within a border radius of one voxel
-			points_other = []
+	# Add velocity to this object, 1 is the maximum speed allowed for objects
+	def impulse(self, vel):
+		self.vel += vel
+		self.vel = vec3(min(+1, max(-1, self.vel.x)), min(+1, max(-1, self.vel.y)), min(+1, max(-1, self.vel.z)))
+
+	# Physics function, detects collisions with other objects and moves this object to the nearest empty space if one is available
+	def physics(self, gravity: float, friction: float):
+		if self.actor and self.sprites[0]:
+			# Apply gravity and friction to the object the velocity
+			self.vel -= vec3(0, gravity, 0)
+			self.vel *= max(0, 1 - friction)
+			self.vel_step += self.vel
+
+			# Add the velocity to the velocity step, once a velocity step has reached 1 move the object one unit in that direction
+			# Only one direction per call is supported as to not break unsticking, prefer Y so gravity has priority
+			step = None
+			if self.vel_step != 0:
+				if abs(self.vel_step.y) >= 1 and abs(self.vel_step.y) >= abs(self.vel_step.x) and abs(self.vel_step.y) >= abs(self.vel_step.z):
+					step = self.vel_step.y < 0 and vec3(0, -1, 0) or vec3(0, +1, 0)
+				elif abs(self.vel_step.x) >= 1 and abs(self.vel_step.x) >= abs(self.vel_step.y) and abs(self.vel_step.x) >= abs(self.vel_step.z):
+					step = self.vel_step.x < 0 and vec3(-1, 0, 0) or vec3(+1, 0, 0)
+				elif abs(self.vel_step.z) >= 1 and abs(self.vel_step.z) >= abs(self.vel_step.x) and abs(self.vel_step.z) >= abs(self.vel_step.y):
+					step = self.vel_step.z < 0 and vec3(0, 0, -1) or vec3(0, 0, +1)
+			if step:
+				self.move(self.pos + step)
+				self.vel_step -= step
+
+			# Collision checking: Store the world positions of solid voxels in other objects that intersect self's bounding box within a border radius of one voxel
+			frame = Frame()
 			for obj in objects:
 				if obj != self and obj.sprites[0] and obj.intersects(self.mins - 1, self.maxs + 1):
 					for pos, mat in obj.get_sprite().get_voxels(None):
 						if mat and mat.solid:
 							pos_world = obj.maxs - pos
 							if pos_world >= self.mins - 1 and pos_world <= self.maxs + 1:
-								points_other.append(pos_world)
+								frame.set_voxel(pos_world, mat)
 
-			# Check at which positions any voxel in this object overlaps that of another object, note which directions are solid in the same order: No offset, -X, +X, -Y, +Y, -Z, +Z
-			# Iteration is done over the list of other points instead of self's points since it's expected to be smaller, an object should usually only intersect by 1 unit
-			# If there are no collisions at the current position, there's no need to move the object and check other slots so the check ends at the first item
-			offsets = [vec3(0, 0, 0), vec3(-1, 0, 0), vec3(+1, 0, 0), vec3(0, -1, 0), vec3(0, +1, 0), vec3(0, 0, -1), vec3(0, 0, +1)]
-			collides = [False] * len(offsets)
+			# Iteration is done over the list of other points instead of self's points since it's expected to be smaller, an object should only intersect by 1 unit
+			# The first check verifies if a collision exists at the current position, other directions won't be checked if there's no need to unstick
+			# Check at which positions any voxel in this object overlaps that of another object in order of: Current position, -Y, +Y, -X, +X, -Z, +Z
+			# The Y axis has priority so that stairs and floors push players upward before acting as walls and pushing actors horizontally
+			offsets = [vec3(0, 0, 0), vec3(0, -1, 0), vec3(0, +1, 0), vec3(-1, 0, 0), vec3(+1, 0, 0), vec3(0, 0, -1), vec3(0, 0, +1)]
 			for i in range(len(offsets)):
-				for pos_other in points_other:
-					if pos_other - offsets[i] in points_self:
-						collides[i] = True
-						break
-				if i == 0 and not collides[i]:
+				offset = offsets[i]
+				for pos, mat in frame.get_voxels():
+					if mat and mat.solid:
+						mat_self = self.get_sprite().get_voxel(None, self.maxs - pos + offsets[i])
+						if mat_self and mat_self.solid:
+							offset = None
+							break
+				if offset:
+					if i > 0:
+						self.move(self.pos + offsets[i])
+						self.vel *= vec3(1, 1, 1) - abs(offsets[i])
 					break
-
-			# Pick a valid direction to move the object in, give priority to the Y axis so stairs and floors push players upward before acting as walls
-			if collides[0]:
-				if not collides[3]:
-					self.move(vec3(0, -1, 0))
-				elif not collides[4]:
-					self.move(vec3(0, +1, 0))
-				elif not collides[1]:
-					self.move(vec3(-1, 0, 0))
-				elif not collides[2]:
-					self.move(vec3(+1, 0, 0))
-				elif not collides[5]:
-					self.move(vec3(0, 0, -1))
-				elif not collides[6]:
-					self.move(vec3(0, 0, +1))
 
 	# Set a sprite as the active sprite, None removes the sprite from this object and disables it
 	# If more than one sprite is provided, store up 4 sprites representing object angles
@@ -299,10 +308,9 @@ class Object:
 		for i in range(len(sprites)):
 			self.sprites[i] = sprites[i]
 		if self.sprites[0]:
-			self.size = self.sprites[0].size / 2
-			self.size = self.size.int()
-			self.mins = self.pos.int() - self.size
-			self.maxs = self.pos.int() + self.size
+			self.size = math.trunc(self.sprites[0].size / 2)
+			self.mins = math.trunc(self.pos) - self.size
+			self.maxs = math.trunc(self.pos) + self.size
 
 	# Get the appropriate sprite for this object based on which 0* / 90* / 180* / 270* direction it's facing toward
 	def get_sprite(self):

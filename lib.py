@@ -80,11 +80,32 @@ class vec2:
 		else:
 			return self.x >= other and self.y >= other
 
+	def __neg__(self):
+		return vec3(-self.x, -self.y)
+
+	def __pos__(self):
+		return vec3(+self.x, +self.y)
+
+	def __invert__(self):
+		return vec3(~self.x, ~self.y)
+
+	def __abs__(self):
+		return vec3(abs(self.x), abs(self.y))
+
+	def __round__(self):
+		return vec3(round(self.x), round(self.y))
+
+	def __trunc__(self):
+		return vec3(math.trunc(self.x), math.trunc(self.y))
+
+	def __floor__(self):
+		return vec3(math.floor(self.x), math.floor(self.y))
+
+	def __ceil__(self):
+		return vec3(math.ceil(self.x), math.ceil(self.y))
+
 	def __str__(self):
 		return str(self.x) + "," + str(self.y)
-
-	def int(self):
-		return vec2(math.trunc(self.x), math.trunc(self.y))
 
 	def array(self):
 		return [self.x, self.y]
@@ -175,11 +196,32 @@ class vec3:
 		else:
 			return self.x >= other and self.y >= other and self.z >= other
 
+	def __neg__(self):
+		return vec3(-self.x, -self.y, -self.z)
+
+	def __pos__(self):
+		return vec3(+self.x, +self.y, +self.z)
+
+	def __invert__(self):
+		return vec3(~self.x, ~self.y, ~self.z)
+
+	def __abs__(self):
+		return vec3(abs(self.x), abs(self.y), abs(self.z))
+
+	def __round__(self):
+		return vec3(round(self.x), round(self.y), round(self.z))
+
+	def __trunc__(self):
+		return vec3(math.trunc(self.x), math.trunc(self.y), math.trunc(self.z))
+
+	def __floor__(self):
+		return vec3(math.floor(self.x), math.floor(self.y), math.floor(self.z))
+
+	def __ceil__(self):
+		return vec3(math.ceil(self.x), math.ceil(self.y), math.ceil(self.z))
+
 	def __str__(self):
 		return str(self.x) + "," + str(self.y) + "," + str(self.z)
-
-	def int(self):
-		return vec3(math.trunc(self.x), math.trunc(self.y), math.trunc(self.z))
 
 	def array(self):
 		return [self.x, self.y, self.z]

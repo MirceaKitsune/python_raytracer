@@ -155,9 +155,12 @@ class Window:
 		self.smooth = cfg.getboolean("WINDOW", "smooth") or False
 		self.fps = cfg.getint("WINDOW", "fps") or 24
 		self.threads = cfg.getint("RENDER", "threads") or mp.cpu_count()
-		self.speed_move = cfg.getfloat("INPUT", "speed_move") or 10
-		self.speed_mouse = cfg.getfloat("INPUT", "speed_mouse") or 10
-		self.max_pitch = cfg.getfloat("INPUT", "max_pitch") or 0
+		self.gravity = cfg.getfloat("PHYSICS", "gravity") or 0
+		self.friction = cfg.getfloat("PHYSICS", "friction") or 0
+		self.speed_jump = cfg.getfloat("PHYSICS", "speed_jump") or 100
+		self.speed_move = cfg.getfloat("PHYSICS", "speed_move") or 10
+		self.speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 10
+		self.max_pitch = cfg.getfloat("PHYSICS", "max_pitch") or 0
 
 		# Configure Pygame and the main screen as well as the camera and thread pool that will be used to update the window
 		pg.init()
@@ -178,7 +181,7 @@ class Window:
 			for obj in data.objects:
 				if obj.cam_pos:
 					self.update(obj)
-				obj.unstick()
+				obj.physics(self.gravity, self.friction)
 
 			fps = pg.mouse.get_focused() and self.fps or math.trunc(self.fps / 5)
 			self.clock.tick(fps)
@@ -190,6 +193,7 @@ class Window:
 		mods = pg.key.get_mods()
 		d = obj.rot.dir(False)
 		units = self.clock.get_time() / 1000 * self.speed_move
+		units_jump = self.clock.get_time() / 1000 * self.speed_jump
 		units_mouse = self.speed_mouse / 1000
 
 		# Render: Request the camera to draw new tiles, add the image of each tile to the canvas at its correct position once all segments have been received
@@ -224,8 +228,8 @@ class Window:
 				if e.key == pg.K_TAB:
 					self.mouselook = not self.mouselook
 			if e.type == pg.MOUSEWHEEL:
-				obj.move(vec3(+d.z, 0, -d.x) * e.x * 5)
-				obj.move(vec3(+d.x, +d.y, +d.z) * e.y * 5)
+				obj.impulse(vec3(+d.z, 0, -d.x) * e.x * 5)
+				obj.impulse(vec3(+d.x, +d.y, +d.z) * e.y * 5)
 			if e.type == pg.MOUSEMOTION and self.mouselook:
 				center = self.rect_win / 2
 				x, y = pg.mouse.get_pos()
@@ -236,17 +240,17 @@ class Window:
 
 		# Input, ongoing events: Camera movement, camera rotation
 		if keys[pg.K_w]:
-			obj.move(vec3(+d.x, +d.y, +d.z) * units)
+			obj.impulse(vec3(+d.x, +d.y, +d.z) * units)
 		if keys[pg.K_s]:
-			obj.move(vec3(-d.x, -d.y, -d.z) * units)
+			obj.impulse(vec3(-d.x, -d.y, -d.z) * units)
 		if keys[pg.K_a]:
-			obj.move(vec3(-d.z, 0, +d.x) * units)
+			obj.impulse(vec3(-d.z, 0, +d.x) * units)
 		if keys[pg.K_d]:
-			obj.move(vec3(+d.z, 0, -d.x) * units)
+			obj.impulse(vec3(+d.z, 0, -d.x) * units)
 		if keys[pg.K_r]:
-			obj.move(vec3(0, +1, 0) * units)
+			obj.impulse(vec3(0, +1, 0) * units_jump)
 		if keys[pg.K_f]:
-			obj.move(vec3(0, -1, 0) * units)
+			obj.impulse(vec3(0, -1, 0) * units_jump)
 		if keys[pg.K_UP]:
 			obj.rotate(vec3(0, +5, 0) * units, self.max_pitch)
 		if keys[pg.K_DOWN]:
