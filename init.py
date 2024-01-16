@@ -155,8 +155,6 @@ class Window:
 		self.smooth = cfg.getboolean("WINDOW", "smooth") or False
 		self.fps = cfg.getint("WINDOW", "fps") or 24
 		self.threads = cfg.getint("RENDER", "threads") or mp.cpu_count()
-		self.gravity = cfg.getfloat("PHYSICS", "gravity") or 0
-		self.friction = cfg.getfloat("PHYSICS", "friction") or 0
 		self.speed_jump = cfg.getfloat("PHYSICS", "speed_jump") or 100
 		self.speed_move = cfg.getfloat("PHYSICS", "speed_move") or 10
 		self.speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 10
@@ -181,7 +179,7 @@ class Window:
 			for obj in data.objects:
 				if obj.cam_pos:
 					self.update(obj)
-				obj.physics(self.gravity, self.friction)
+				obj.physics(self.clock.get_time())
 
 			fps = pg.mouse.get_focused() and self.fps or math.trunc(self.fps / 5)
 			self.clock.tick(fps)

@@ -250,55 +250,63 @@ class Object:
 		self.vel = vec3(min(+1, max(-1, self.vel.x)), min(+1, max(-1, self.vel.y)), min(+1, max(-1, self.vel.z)))
 
 	# Physics function, detects collisions with other objects and moves this object to the nearest empty space if one is available
-	def physics(self, gravity: float, friction: float):
+	def physics(self, time: float):
 		if self.actor and self.sprites[0]:
-			# Apply gravity and friction to the object the velocity
-			self.vel -= vec3(0, gravity, 0)
-			self.vel *= max(0, 1 - friction)
-			self.vel_step += self.vel
+			# List of offsets used to calculate neighboring object positions in order: Current position, -X, +X, -Y, +Y, -Z, +Z
+			offset = [vec3(0, 0, 0), vec3(-1, 0, 0), vec3(+1, 0, 0), vec3(0, -1, 0), vec3(0, +1, 0), vec3(0, 0, -1), vec3(0, 0, +1)]
 
-			# Add the velocity to the velocity step, once a velocity step has reached 1 move the object one unit in that direction
-			# Only one direction per call is supported as to not break unsticking, prefer Y so gravity has priority
-			step = None
-			if self.vel_step != 0:
-				if abs(self.vel_step.y) >= 1 and abs(self.vel_step.y) >= abs(self.vel_step.x) and abs(self.vel_step.y) >= abs(self.vel_step.z):
-					step = self.vel_step.y < 0 and vec3(0, -1, 0) or vec3(0, +1, 0)
-				elif abs(self.vel_step.x) >= 1 and abs(self.vel_step.x) >= abs(self.vel_step.y) and abs(self.vel_step.x) >= abs(self.vel_step.z):
-					step = self.vel_step.x < 0 and vec3(-1, 0, 0) or vec3(+1, 0, 0)
-				elif abs(self.vel_step.z) >= 1 and abs(self.vel_step.z) >= abs(self.vel_step.x) and abs(self.vel_step.z) >= abs(self.vel_step.y):
-					step = self.vel_step.z < 0 and vec3(0, 0, -1) or vec3(0, 0, +1)
-			if step:
-				self.move(self.pos + step)
-				self.vel_step -= step
-
-			# Collision checking: Store the world positions of solid voxels in other objects that intersect self's bounding box within a border radius of one voxel
+			# Store solid voxels from other objects that intersect self's bounding box within a border radius of one voxel for collision checking
 			frame = Frame()
 			for obj in objects:
 				if obj != self and obj.sprites[0] and obj.intersects(self.mins - 1, self.maxs + 1):
 					for pos, mat in obj.get_sprite().get_voxels(None):
-						if mat and mat.solid:
+						if mat.solidity > random.random():
 							pos_world = obj.maxs - pos
 							if pos_world >= self.mins - 1 and pos_world <= self.maxs + 1:
 								frame.set_voxel(pos_world, mat)
 
-			# Iteration is done over the list of other points instead of self's points since it's expected to be smaller, an object should only intersect by 1 unit
-			# The first check verifies if a collision exists at the current position, other directions won't be checked if there's no need to unstick
-			# Check at which positions any voxel in this object overlaps that of another object in order of: Current position, -Y, +Y, -X, +X, -Z, +Z
-			# The Y axis has priority so that stairs and floors push players upward before acting as walls and pushing actors horizontally
-			offsets = [vec3(0, 0, 0), vec3(0, -1, 0), vec3(0, +1, 0), vec3(-1, 0, 0), vec3(+1, 0, 0), vec3(0, 0, -1), vec3(0, 0, +1)]
-			for i in range(len(offsets)):
-				offset = offsets[i]
+			# Check at which neighboring positions any voxel in this object overlaps that of other objects to determine which locations are free
+			# Iteration is done over the list of other points since it's expected to be smaller, an object should usually intersect by only 1 unit
+			# The check is also used to estimate friction and elasticity, by comparing the values of all voxels that would touch at any position
+			weight = friction = elasticity = 0
+			offset_free = [True] * len(offset)
+			for i in range(len(offset)):
 				for pos, mat in frame.get_voxels():
-					if mat and mat.solid:
-						mat_self = self.get_sprite().get_voxel(None, self.maxs - pos + offsets[i])
-						if mat_self and mat_self.solid:
-							offset = None
-							break
-				if offset:
-					if i > 0:
-						self.move(self.pos + offsets[i])
-						self.vel *= vec3(1, 1, 1) - abs(offsets[i])
-					break
+					mat_self = self.get_sprite().get_voxel(None, self.maxs - pos + offset[i])
+					if mat_self:
+						if mat_self.solidity > random.random():
+							offset_free[i] = False
+						friction += mat.friction * mat_self.friction
+						elasticity += mat.elasticity * mat_self.elasticity
+			for pos, mat in self.get_sprite().get_voxels(None):
+				weight += mat.weight
+
+			# Modify object velocity based on weight and friction, apply velocity to the step counter and reset it when -1 or +1 is reached on an axis
+			# Note which directions are desired based on velocity in the same order as offsets, current position is always false
+			# If a position collides in the direction of velocity, reflect the velocity on that axis based on elasticity
+			# Time acts as a multiplier to the final velocity and is used to correct movement with FPS
+			self.vel -= vec3(0, weight, 0)
+			self.vel *= max(0, 1 - friction)
+			for i in range(1, len(offset)):
+				if not offset_free[i]:
+					if (self.vel.x < 0 and offset[i].x < 0) or (self.vel.x > 0 and offset[i].x > 0):
+						self.vel.x *= -min(1, elasticity)
+					if (self.vel.y < 0 and offset[i].y < 0) or (self.vel.y > 0 and offset[i].y > 0):
+						self.vel.y *= -min(1, elasticity)
+					if (self.vel.z < 0 and offset[i].z < 0) or (self.vel.z > 0 and offset[i].z > 0):
+						self.vel.z *= -min(1, elasticity)
+			self.vel_step += self.vel * time
+			offset_desired = [False, self.vel_step.x <= -1, self.vel_step.x >= +1, self.vel_step.y <= -1, self.vel_step.y >= +1, self.vel_step.z <= -1, self.vel_step.z >= +1]
+			self.vel_step -= math.trunc(self.vel_step)
+
+			# Pick a random direction to move to from the list of valid directions that can be preformed this execution
+			# If the object is free move only to a desired position based on velocity, if the object is stuck any free position is allowed
+			positions = []
+			for i in range(1, len(offset)):
+				if offset_free[i] and (offset_desired[i] or not offset_free[0]):
+					positions.append(offset[i])
+			if len(positions):
+				self.move(self.pos + random.choice(positions))
 
 	# Set a sprite as the active sprite, None removes the sprite from this object and disables it
 	# If more than one sprite is provided, store up 4 sprites representing object angles

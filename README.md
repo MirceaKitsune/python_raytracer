@@ -15,8 +15,8 @@ The code is under the GPL license, created and developed by MirceaKitsune. Execu
 ## Features and TODO
 
   - [x] Programmable material functions. Each voxel can hold both unique material properties as well as a function that tells light rays how to behave upon collision.
-  - [x] Simplified physically accurate material provided by default. Simulates all basic PBR features such as: Accurate reflections and refractions with roughness, plasticity and metalicity with accurate interactions, translucency and anisotropy with IOR support, density for volumetrics, emission via a ray energy system which supports ambient and sky lighting.
-  - [x] Basic physics system with support for interactions between voxel meshes, velocity is gradually applied in integer steps to guarantee objects are properly aligned.
+  - [x] Physically accurate material provided by default. Simulates all basic PBR features such as: Ray reflection and refraction with roughness, plasticity and metalicity with accurate color interactions, translucency and anisotropy with IOR support, density for volumetrics, emission via a ray energy system which supports ambient and sky lighting.
+  - [x] Physics system which supports collisions between individual voxels. Physics properties such as weight friction or elasticity are calculated based on interactions with neighboring materials, allowing different surfaces in any object to have their own specific physical behaviors.
   - [ ] Support cammera rolling if this becomes possible. Current vector math doesn't support a third axis of transformation, you can only look horizontally and vertically.
   - [ ] Add perlin noise. May be possible to support an object based chunk system for generating infinite terrain.
   - [ ] Create a script to convert image slices into pixel meshes. This will allow importing 3D sprites from 2D images.
@@ -27,8 +27,6 @@ The code is under the GPL license, created and developed by MirceaKitsune. Execu
 Settings are stored within the `config.cfg` file and can be used to modify how the engine behaves. A custom config can be used by parsing it as an argument to the main script on launch, eg: `init.py my_config.cfg`. Below is a description of each category and setting:
 
   - `PHYSICS`: Physics related settings including player movement.
-    - `gravity`: Global gravity setting, this amount of velocity is added on the -Y axis.
-    - `friction`: Global air resistance, physical objects lose velocity by this amount.
     - `speed_jump`: Jump speed of the player, determines how fast the player moves vertically.
     - `speed_move`: Keyboard movement speed of the player, determines how fast the camera moves when using the movement keys.
     - `speed_mouse`: Mouse rotation speed of the player, determines how fast the camera rotates when moving the mouse in mouselook mode.
@@ -55,7 +53,7 @@ Settings are stored within the `config.cfg` file and can be used to modify how t
 
 ## Default material settings
 
-A material is registered using the register_material call with a list of settings. Below is a list of properties used to customize the default shader function or specify your own, unique properties are supported for use in custom material functions. Note that materials are global, changes done to a material will be immediately reflected on all voxels with that material.
+A material is registered using the `register_material` call with a list of settings. Below is a list of properties used to customize the default shader function or specify your own, unique properties are supported for use in custom material functions. Materials contain both visual properties that determine interactions with light rays, as well as physical properties controlling how objects collide with each other. Note that materials are global, changes done to a material will be immediately reflected on all voxels with that material.
 
   - `function`: Material function to call when a ray hits this material, use `material_default` unless you want a custom shader. 
   - `albedo`: The color of this material in RGB format, eg: `255, 127, 0`. Blended to the light ray based on the ray's absorption.
@@ -63,7 +61,10 @@ A material is registered using the register_material call with a list of setting
   - `absorption`: The ability of this material to absorb color, 0 acts as a perfect mirror while 1 is a perfect absorbant. Controls both transparency and metalicity: Use with an `ior` under 0.5 to get a transparent surface and over 0.5 for a metallic one. If solid use 1 for plastic, 0.5 for metal, 0 for a mirror... if transparent try 1 for painted glass or 0.25 for fog.
   - `ior`: Amount by which light rays are reflected by or pass through the surface. This isn't an accurate IOR value and named that way for familiarity, it multiplies how much the ray is reflected and acts as the real controller for determining translucency. If the material represents an opaque surface this should be 1 for accurate ray bounces, lower slightly to simulate anisotropy... a value close to 0.5 can be used to send rays inward and encourage subsurface scattering... if transparent it should be well below 0.5 to send light rays through, use a low value to simulate IOR or 0 to leave ray velocity unchanged.
   - `energy`: How much energy this material emits. Use 0 for normal surfaces and increase for voxels that emit light. A flame should be roughly 0.25, a standard light bulb 0.5 or lower, the sun should be 1.
-  - `solid`: Physics property. If true this voxel is checked during physics interactions and collides with voxels in other objects.
+  - `solidity`: Physics property. Random chance that this material will be considered solid. When solid this voxel is checked during physics interactions and collides with voxels in other objects, otherwise this material is ignored by the physics system. Always use 1 for full solids like walls, 0 for non-solids such as fog, while an intermediary value such as 0.25 is ideal for fluids.
+  - `weight`: Physics property used exclusively by actor objects, the cumulative value of all voxels on an object determines its overall weight. Makes an object heavier and pulled down faster by gravity, can be negative to make the object rise instead of falling. Does not affect interactions between different physical objects.
+  - `friction`: Physics property used in interactions with actor objects, the property on the object's voxels is calculated against those of neighboring voxels. Influences the amount by which the object loses velocity over time when touching other surfaces. Note that no air friction exists by default and the void won't slow objects down: For air resistance create an invisible or fog material with a `solidity` of 0 and give it a small friction value.
+  - `elasticity`: Physics property used in interactions with actor objects, the property on the object's voxels is calculated against those of neighboring voxels. Influences the amount by which an object's velocity is reflected when a solid surface is hit. If elasticity is 0 the object stops completely in that axis, if 1 the object will be bounced back at exactly the same speed it hit the surface with.
 
 Note: The number of hits accounted for by the raytracer increases with `ior`, a value of 0 doesn't count as a hit while 1 is a full hit. Low reflectivity reduces bounce based ray termination controlled by the `terminate_hits` setting, making rays live longer which may degrade performance if a ray gets stuck bouncing inside a solid. An `ior` of 0 can be used to make volumetric fog, but since fog voxels are processed without reducing ray life this should be done sparingly to avoid performance loss.
 
