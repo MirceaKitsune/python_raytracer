@@ -14,10 +14,10 @@ The code is under the GPL license, created and developed by MirceaKitsune. Execu
 
 ## Features and TODO
 
+  - [x] Mod loader which allows launching the engine with any data package containing its own config and init script.
   - [x] Programmable material functions. Each voxel can hold both unique material properties as well as a function that tells light rays how to behave upon collision.
   - [x] Physically accurate material provided by default. Simulates all basic PBR features such as: Ray reflection and refraction with roughness, plasticity and metalicity with accurate color interactions, translucency and anisotropy with IOR support, density for volumetrics, emission via a ray energy system which supports ambient and sky lighting.
   - [x] Physics system which supports collisions between individual voxels. Physics properties such as weight friction or elasticity are calculated based on interactions with neighboring materials, allowing different surfaces in any object to have their own specific physical behaviors.
-  - [ ] Support cammera rolling if this becomes possible. Current vector math doesn't support a third axis of transformation, you can only look horizontally and vertically.
   - [ ] Add perlin noise. May be possible to support an object based chunk system for generating infinite terrain.
   - [ ] Create a script to convert image slices into pixel meshes. This will allow importing 3D sprites from 2D images.
   - [ ] Sound support in the form of either audio files or a frequency generator associated with materials. Audio is also intended to be raytraced.
@@ -87,7 +87,7 @@ Sky function: In addition to material functions which are executed when the ray 
 
 ## Creating a scene
 
-This describes the procedure for setting up a custom scene. The engine is in early development and anything mentioned here is subject to change! At the moment sprites can only be painted via code, importing sprites from image slices is a planned feature. Currently the default scene is located in builtin.py and automatically activated in init.py, currently mods are not supported so you'll need to replace the default world with your own function here.
+This describes the procedure for setting up a custom scene. The engine is in early development and anything mentioned here is subject to change! The first step is to setup your own mod: Simply create a new directory in the mods folder, it needs to contain your own copy of `config.cfg` as well as an `init.py` script that will execute before the main window is created, simply run the engine with your mod as an argument for example `init.py default` to launch the default world. At the moment sprites can only be painted via code, importing sprites from image slices is a planned feature.
 
 There are 3 main components to a scene: Materials, sprites, objects. Each acts as a subset of the other: Materials are points with unique properties acting as atoms, sprites are 3D textures storing materials located at different points, objects hold a set of sprites which they express in 3D space. The first step is creating one or more materials as described above and customizing their properties to get the types of surface you want, afterward paint a 3D sprite with your materials by adding each one at the correct location to form a shape, lastly create an object and give it the newly painted sprite. Materials and sprites can be retroactively modified with immediate results, always clone when you wish to customize one independently. Below is a simplified example of setting up a basic scene, does not include the mandatory player object which needs to be set in a similar way (see `object.set_camera`).
 

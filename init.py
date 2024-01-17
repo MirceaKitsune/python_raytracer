@@ -1,13 +1,20 @@
 #!/usr/bin/python3
 from lib import *
 
+import importlib
+import configparser
+
 import multiprocessing as mp
 import pygame as pg
 import math
 import random
 
-import builtin
 import data
+
+# Fetch the mod name and load the config from the mod path
+mod = len(sys.argv) > 1 and sys.argv[1].strip() or "default"
+cfg = configparser.RawConfigParser()
+cfg.read("mods/" + mod + "/config.cfg")
 
 # Camera: A subset of Window which only stores data needed for rendering and is used by threads, preforms ray tracing and draws tiles which are overlayed to the canvas by the main thread
 class Camera:
@@ -258,6 +265,6 @@ class Window:
 		if keys[pg.K_RIGHT]:
 			obj.rotate(vec3(0, 0, +5) * units, self.max_pitch)
 
-# Load the default world and create the main window
-builtin.world()
-win = Window()
+# Import the init script of the mod and create the main window
+importlib.import_module("mods." + mod + ".init")
+Window()
