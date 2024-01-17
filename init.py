@@ -38,7 +38,7 @@ class Camera:
 		self.rot = vec3(0, 0, 0)
 		self.lens = self.fov * math.pi / 8
 		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
-		self.frame = data.Frame()
+		self.objects = []
 
 	# Trace the pixel based on the given 2D direction which is used to calculate ray velocity from lens distorsion: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
 	def trace(self, dir_x: float, dir_y: float):
@@ -67,29 +67,33 @@ class Camera:
 		# If a material is found, its function is called which can modify any of the ray properties provided
 		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
 		while ray.step < ray.life:
-			mat = self.frame.get_voxel(ray.pos)
-			if mat:
-				# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
-				# A material considers its neighbors solid if they have the same IOR, otherwise they won't affect the direction of ray reflections
-				# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
-				if mat.ior:
-					direction = (mat.ior - 0.5) * 2
-					ofs_x = ray.vel.x * direction < 0 and vec3(+1, 0, 0) or vec3(-1, 0, 0)
-					ofs_y = ray.vel.y * direction < 0 and vec3(0, +1, 0) or vec3(0, -1, 0)
-					ofs_z = ray.vel.z * direction < 0 and vec3(0, 0, +1) or vec3(0, 0, -1)
-					mat_x = self.frame.get_voxel(ray.pos + ofs_x)
-					mat_y = self.frame.get_voxel(ray.pos + ofs_y)
-					mat_z = self.frame.get_voxel(ray.pos + ofs_z)
-					if not (mat_x and mat_x.ior == mat.ior):
-						ray.vel.x = mix(+ray.vel.x, -ray.vel.x, mat.ior)
-					if not (mat_y and mat_y.ior == mat.ior):
-						ray.vel.y = mix(+ray.vel.y, -ray.vel.y, mat.ior)
-					if not (mat_z and mat_z.ior == mat.ior):
-						ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
+			for obj in self.objects:
+				if obj.intersects(ray.pos, ray.pos):
+					spr = obj.get_sprite()
+					mat = spr.get_voxel(None, obj.maxs - ray.pos)
+					if mat:
+						# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
+						# A material considers its neighbors solid if they have the same IOR, otherwise they won't affect the direction of ray reflections
+						# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
+						if mat.ior:
+							direction = (mat.ior - 0.5) * 2
+							ofs_x = ray.vel.x * direction < 0 and vec3(-1, 0, 0) or vec3(+1, 0, 0)
+							ofs_y = ray.vel.y * direction < 0 and vec3(0, -1, 0) or vec3(0, +1, 0)
+							ofs_z = ray.vel.z * direction < 0 and vec3(0, 0, -1) or vec3(0, 0, +1)
+							mat_x = spr.get_voxel(None, obj.maxs - ray.pos + ofs_x)
+							mat_y = spr.get_voxel(None, obj.maxs - ray.pos + ofs_y)
+							mat_z = spr.get_voxel(None, obj.maxs - ray.pos + ofs_z)
+							if not (mat_x and mat_x.ior == mat.ior):
+								ray.vel.x = mix(+ray.vel.x, -ray.vel.x, mat.ior)
+							if not (mat_y and mat_y.ior == mat.ior):
+								ray.vel.y = mix(+ray.vel.y, -ray.vel.y, mat.ior)
+							if not (mat_z and mat_z.ior == mat.ior):
+								ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
 
-				# Call the material function, normalize ray velocity after making changes to ensure the speed of light remains 1 and future voxels aren't skipped or calculated twice
-				mat.function(ray, mat)
-				ray.vel = ray.vel.normalize()
+						# Call the material function, normalize ray velocity after making changes to ensure the speed of light remains 1 and future voxels aren't skipped or calculated twice
+						mat.function(ray, mat)
+						ray.vel = ray.vel.normalize()
+						break
 
 			# Terminate this ray earlier in some circumstances to improve performance
 			if ray.hits and self.terminate_hits / ray.hits < random.random():
@@ -107,12 +111,13 @@ class Camera:
 	# Called by threads with a thread ID indicating the tile number, creates a new surface for this thread to paint to which is returned to the main thread as a byte string
 	# The alpha channel is used to skip drawing unchanged pixels and apply the blur effect by reducing how much pixels on the image are blended to the canvas
 	def draw(self, thread):
-		tile = pg.Surface((self.width, math.ceil(self.height / self.threads)), pg.HWSURFACE + pg.SRCALPHA)
+		tile = pg.Surface((self.width, self.height), pg.HWSURFACE + pg.SRCALPHA)
 		lines = math.ceil(self.height / self.threads)
 		for x in range(self.width):
 			dir_x = (-0.5 + x / self.width) * 2
 			for y in range(lines):
-				dir_y = (-0.5 + (y + lines * thread) / self.height) * 2
+				y_line = y + (lines * thread)
+				dir_y = (-0.5 + y_line / self.height) * 2
 				colors = []
 
 				# Preform a trace for each sample and get its pixel color, the number of samples is the closest integer between the minimum and maximum random sample range
@@ -135,23 +140,19 @@ class Camera:
 					col_g = round(col_g / len(colors))
 					col_b = round(col_b / len(colors))
 					col_a = round(self.blur * 255)
-					tile.set_at((x, y), (col_r, col_g, col_b, col_a))
+					tile.set_at((x, y_line), (col_r, col_g, col_b, col_a))
 
 		return pg.image.tobytes(tile, "RGBA")
 
 	# Update the position and rotation this camera will shoot rays from
-	# The voxels of valid objects are compiled to a virtual frame local to the camera, which is used once per redraw to preform ray tracing
-	# Only check objects containing a sprite that are within the view range, after which only add voxels that are themselves within range
+	# Valid objects are compiled to an object list local to the camera which is used once per redraw
 	def move(self, pos: vec3, rot: vec3):
 		self.pos = pos
 		self.rot = rot
-		self.frame.clear()
+		self.objects = []
 		for obj in data.objects:
 			if obj.sprites[0] and math.dist(obj.pos.array(), self.pos.array()) <= self.dist_max + obj.size.max():
-				for pos, mat in obj.get_sprite().get_voxels(None):
-					pos_world = obj.maxs - pos
-					if mat and math.dist(pos_world.array(), self.pos.array()) <= self.dist_max:
-						self.frame.set_voxel(pos_world, mat)
+				self.objects.append(obj)
 
 # Window: Initializes Pygame and starts the main loop, handles all updates and redraws the canvas using a Camera instance
 class Window:
@@ -162,6 +163,7 @@ class Window:
 		self.smooth = cfg.getboolean("WINDOW", "smooth") or False
 		self.fps = cfg.getint("WINDOW", "fps") or 24
 		self.threads = cfg.getint("RENDER", "threads") or mp.cpu_count()
+		self.threads_sync = cfg.getboolean("RENDER", "threads_sync") or False
 		self.speed_jump = cfg.getfloat("PHYSICS", "speed_jump") or 100
 		self.speed_move = cfg.getfloat("PHYSICS", "speed_move") or 10
 		self.speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 10
@@ -183,39 +185,51 @@ class Window:
 
 		# Main loop, limited by FPS with a slower clock when the window isn't focused
 		while self.running:
-			for obj in data.objects:
-				if obj.cam_pos:
-					self.update(obj)
-				obj.physics(self.clock.get_time())
-
+			self.update()
 			fps = pg.mouse.get_focused() and self.fps or math.trunc(self.fps / 5)
 			self.clock.tick(fps)
 
-	# Render a new frame from the perspective of the main object, move the object and preform other actions based on input
-	def update(self, obj: data.Object):
-		pg.mouse.set_visible(not self.mouselook)
-		keys = pg.key.get_pressed()
-		mods = pg.key.get_mods()
-		d = obj.rot.dir(False)
-		units = self.clock.get_time() / 1000 * self.speed_move
-		units_jump = self.clock.get_time() / 1000 * self.speed_jump
-		units_mouse = self.speed_mouse / 1000
+			if not self.running:
+				self.pool.close()
+				self.pool.join()
+				exit
 
-		# Render: Request the camera to draw new tiles, add the image of each tile to the canvas at its correct position once all segments have been received
+	# Called by the thread pool on finish, contains a list of tiles to be added to the canvas
+	def update_draw(self, result):
 		tiles = []
-		self.cam.move(obj.pos + vec3(obj.cam_pos.x * d.x, obj.cam_pos.y, obj.cam_pos.x * d.z), obj.rot)
-		result = self.pool.map(self.cam.draw, range(self.threads))
-		for i in range(len(result)):
-			srf = pg.image.frombytes(result[i], (self.width, math.ceil(self.height / self.threads)), "RGBA")
-			tiles.append((srf, (0, math.ceil(self.height / self.threads) * i)))
-		self.canvas.blits(tiles)
+		for image in result:
+			srf = pg.image.frombytes(image, (self.width, self.height), "RGBA")
+			self.canvas.blit(srf, (0, 0))
+			tiles.append((srf, (0, 0)))
 
-		# Render: Draw the canvas and info text onto the screen
 		canvas = self.smooth and pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) or pg.transform.scale(self.canvas, self.rect_win.tuple())
 		text_info = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(self.fps) + " FPS"
 		text = self.font.render(text_info, True, (255, 255, 255))
 		self.screen.blit(canvas, (0, 0))
 		self.screen.blit(text, (0, 0))
+
+	# Render a new frame from the perspective of the main object, handle object physics and player control
+	def update(self):
+		obj_cam = None
+		for obj in data.objects:
+			if obj.cam_pos:
+				obj_cam = obj
+			obj.physics(self.clock.get_time())
+
+		pg.mouse.set_visible(not self.mouselook)
+		keys = pg.key.get_pressed()
+		mods = pg.key.get_mods()
+		d = obj_cam.rot.dir(False)
+		units = self.clock.get_time() / 1000 * self.speed_move
+		units_jump = self.clock.get_time() / 1000 * self.speed_jump
+		units_mouse = self.speed_mouse / 1000
+
+		# Render: Request the camera to draw new tiles, the image of each tile is added to the canvas by the callback function of the pool
+		# If thread syncing is enabled the main thread waits for all rendering threads to finish before continuing
+		self.cam.move(obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z), obj_cam.rot)
+		result = self.pool.map_async(self.cam.draw, range(self.threads), callback = self.update_draw)
+		if self.threads_sync:
+			result.wait()
 		pg.display.update()
 
 		# Input, mods: Acceleration
@@ -233,37 +247,37 @@ class Window:
 				if e.key == pg.K_TAB:
 					self.mouselook = not self.mouselook
 			if e.type == pg.MOUSEWHEEL:
-				obj.impulse(vec3(+d.z, 0, -d.x) * e.x * 5)
-				obj.impulse(vec3(+d.x, +d.y, +d.z) * e.y * 5)
+				obj_cam.impulse(vec3(+d.z, 0, -d.x) * e.x * 5)
+				obj_cam.impulse(vec3(+d.x, +d.y, +d.z) * e.y * 5)
 			if e.type == pg.MOUSEMOTION and self.mouselook:
 				center = self.rect_win / 2
 				x, y = pg.mouse.get_pos()
 				ofs = vec2(center.x - x, center.y - y)
 				rot = vec3(0, +ofs.y, -ofs.x)
-				obj.rotate(rot * units_mouse, self.max_pitch)
+				obj_cam.rotate(rot * units_mouse, self.max_pitch)
 				pg.mouse.set_pos((center.x, center.y))
 
 		# Input, ongoing events: Camera movement, camera rotation
 		if keys[pg.K_w]:
-			obj.impulse(vec3(+d.x, +d.y, +d.z) * units)
+			obj_cam.impulse(vec3(+d.x, +d.y, +d.z) * units)
 		if keys[pg.K_s]:
-			obj.impulse(vec3(-d.x, -d.y, -d.z) * units)
+			obj_cam.impulse(vec3(-d.x, -d.y, -d.z) * units)
 		if keys[pg.K_a]:
-			obj.impulse(vec3(-d.z, 0, +d.x) * units)
+			obj_cam.impulse(vec3(-d.z, 0, +d.x) * units)
 		if keys[pg.K_d]:
-			obj.impulse(vec3(+d.z, 0, -d.x) * units)
+			obj_cam.impulse(vec3(+d.z, 0, -d.x) * units)
 		if keys[pg.K_r]:
-			obj.impulse(vec3(0, +1, 0) * units_jump)
+			obj_cam.impulse(vec3(0, +1, 0) * units_jump)
 		if keys[pg.K_f]:
-			obj.impulse(vec3(0, -1, 0) * units_jump)
+			obj_cam.impulse(vec3(0, -1, 0) * units_jump)
 		if keys[pg.K_UP]:
-			obj.rotate(vec3(0, +5, 0) * units, self.max_pitch)
+			obj_cam.rotate(vec3(0, +5, 0) * units, self.max_pitch)
 		if keys[pg.K_DOWN]:
-			obj.rotate(vec3(0, -5, 0) * units, self.max_pitch)
+			obj_cam.rotate(vec3(0, -5, 0) * units, self.max_pitch)
 		if keys[pg.K_LEFT]:
-			obj.rotate(vec3(0, 0, -5) * units, self.max_pitch)
+			obj_cam.rotate(vec3(0, 0, -5) * units, self.max_pitch)
 		if keys[pg.K_RIGHT]:
-			obj.rotate(vec3(0, 0, +5) * units, self.max_pitch)
+			obj_cam.rotate(vec3(0, 0, +5) * units, self.max_pitch)
 
 # Import the init script of the mod and create the main window
 importlib.import_module("mods." + mod + ".init")

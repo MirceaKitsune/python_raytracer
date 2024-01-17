@@ -24,7 +24,7 @@ The code is under the GPL license, created and developed by MirceaKitsune. Execu
 
 ## Settings
 
-Settings are stored within the `config.cfg` file and can be used to modify how the engine behaves. A custom config can be used by parsing it as an argument to the main script on launch, eg: `init.py my_config.cfg`. Below is a description of each category and setting:
+Settings are stored within the mod's `config.cfg` file and can be used to modify how the engine behaves. Below is a description of each category and setting:
 
   - `PHYSICS`: Physics related settings including player movement.
     - `speed_jump`: Jump speed of the player, determines how fast the player moves vertically.
@@ -50,6 +50,7 @@ Settings are stored within the `config.cfg` file and can be used to modify how t
     - `terminate_hits`: Random chance that sampling stops after this number of hits. 0 disables bounces and allows direct hits only, 0.5 has a 50/50 chance of stopping at any step after the first bounce, 1 guarantees at least one bounce with no stopping, 1.5 adds a 50/50 chance of the second bounce not being stopped, 2 allows two bounces with no stopping, etc. Higher values improve performance at the cost of shorter distances and extra blur for reflections. By default this is multiplied by the `ior` material property and hits are represented by how much the ray was reflected.
     - `terminate_dist`: Probability that sampling stops earlier the further a ray has traveled. 0 disables and lets all rays run at their full lifetime, 0.5 allows probabilistic termination to occur from halfway through a ray's life, 1 may terminate all rays but those just spawned in front of the camera. Improves performance but introduces noise in the distance, distant object will fade into the background gradually which looks better.
     - `threads`: The number of threads to use for ray tracing by the thread pool, 0 will use all CPU cores. The screen is divided in vertical chunks so that each thread processes and draws a different area of the canvas, ensure `height` is larger than and equally divisible by the thread count.
+    - `threads_sync`: If true forces the main thread to wait for all renderer threads to finish tracing. This ensures the image is updated once all tiles for that frame have finished: Disabling allows each tile to be updated immediately which feels faster, but can cause tearing as different areas of the screen may be slightly out of sync. Note that when disabled, the FPS counter no longer indicates visual FPS since the clock no longer waits on redrawing. The engine may also freeze for a bit on exit since all threads need to finish before responding to the thread pool close request.
 
 ## Default material settings
 

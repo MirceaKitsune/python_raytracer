@@ -224,7 +224,7 @@ class Object:
 
 	# Check whether another item intersects the bounding box of this object, pos_min and pos_max represent the corners of another box or a point if identical
 	def intersects(self, pos_min: vec3, pos_max: vec3):
-		return pos_min < self.maxs + 1 and pos_max > self.mins
+		return pos_min < self.maxs and pos_max > self.mins
 
 	# Change the virtual rotation of the object by the given amount, pitch is limited to the provided value
 	def rotate(self, rot: vec3, limit_pitch: float):
@@ -249,42 +249,40 @@ class Object:
 		self.vel += vel
 		self.vel = vec3(min(+1, max(-1, self.vel.x)), min(+1, max(-1, self.vel.y)), min(+1, max(-1, self.vel.z)))
 
-	# Physics function, detects collisions with other objects and moves this object to the nearest empty space if one is available
+	# Physics function, applies velocity accounting for collisions with other objects and moves this object to the nearest empty space if one is available
 	def physics(self, time: float):
 		if self.actor and self.sprites[0]:
 			# List of offsets used to calculate neighboring object positions in order: Current position, -X, +X, -Y, +Y, -Z, +Z
 			offset = [vec3(0, 0, 0), vec3(-1, 0, 0), vec3(+1, 0, 0), vec3(0, -1, 0), vec3(0, +1, 0), vec3(0, 0, -1), vec3(0, 0, +1)]
-
-			# Store solid voxels from other objects that intersect self's bounding box within a border radius of one voxel for collision checking
-			frame = Frame()
-			for obj in objects:
-				if obj != self and obj.sprites[0] and obj.intersects(self.mins - 1, self.maxs + 1):
-					for pos, mat in obj.get_sprite().get_voxels(None):
-						if mat.solidity > random.random():
-							pos_world = obj.maxs - pos
-							if pos_world >= self.mins - 1 and pos_world <= self.maxs + 1:
-								frame.set_voxel(pos_world, mat)
+			offset_free = [True] * len(offset)
+			offset_desired = [False] * len(offset)
+			weight = friction = elasticity = 0
 
 			# Check at which neighboring positions any voxel in this object overlaps that of other objects to determine which locations are free
-			# Iteration is done over the list of other points since it's expected to be smaller, an object should usually intersect by only 1 unit
 			# The check is also used to estimate friction and elasticity, by comparing the values of all voxels that would touch at any position
-			weight = friction = elasticity = 0
-			offset_free = [True] * len(offset)
-			for i in range(len(offset)):
-				for pos, mat in frame.get_voxels():
-					mat_self = self.get_sprite().get_voxel(None, self.maxs - pos + offset[i])
-					if mat_self:
-						if mat_self.solidity > random.random():
-							offset_free[i] = False
-						friction += mat.friction * mat_self.friction
-						elasticity += mat.elasticity * mat_self.elasticity
-			for pos, mat in self.get_sprite().get_voxels(None):
+			self_spr = self.get_sprite()
+			for pos, mat in self_spr.get_voxels(None):
 				weight += mat.weight
+			for obj in objects:
+				if obj != self and obj.sprites[0] and obj.intersects(self.mins - 1, self.maxs + 1):
+					obj_spr = obj.get_sprite()
+					for x in range(self.mins.x - 1, self.maxs.x + 2):
+						for y in range(self.mins.y - 1, self.maxs.y + 2):
+							for z in range(self.mins.z - 1, self.maxs.z + 2):
+								pos = vec3(x, y, z)
+								obj_mat = obj_spr.get_voxel(None, obj.maxs - pos)
+								if obj_mat and obj_mat.solidity > random.random():
+									for i in range(len(offset)):
+										self_mat = self_spr.get_voxel(None, self.maxs - pos + offset[i])
+										if self_mat:
+											if self_mat.solidity > random.random():
+												offset_free[i] = False
+											friction += obj_mat.friction * self_mat.friction
+											elasticity += obj_mat.elasticity * self_mat.elasticity
 
 			# Modify object velocity based on weight and friction, apply velocity to the step counter and reset it when -1 or +1 is reached on an axis
 			# Note which directions are desired based on velocity in the same order as offsets, current position is always false
 			# If a position collides in the direction of velocity, reflect the velocity on that axis based on elasticity
-			# Time acts as a multiplier to the final velocity and is used to correct movement with FPS
 			self.vel -= vec3(0, weight, 0)
 			self.vel *= max(0, 1 - friction)
 			for i in range(1, len(offset)):
