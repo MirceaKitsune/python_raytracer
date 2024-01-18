@@ -23,11 +23,9 @@ class Camera:
 		self.height = cfg.getint("WINDOW", "height") or 64
 		self.ambient = cfg.getfloat("RENDER", "ambient") or 0
 		self.static = cfg.getboolean("RENDER", "static") or False
-		self.samples_min = cfg.getfloat("RENDER", "samples_min") or 0
-		self.samples_max = cfg.getfloat("RENDER", "samples_max") or 0
+		self.samples = cfg.getint("RENDER", "samples") or 1
 		self.fov = cfg.getfloat("RENDER", "fov") or 90
 		self.dof = cfg.getfloat("RENDER", "dof") or 0
-		self.blur = cfg.getfloat("RENDER", "blur") or 0
 		self.dist_min = cfg.getint("RENDER", "dist_min") or 0
 		self.dist_max = cfg.getint("RENDER", "dist_max") or 48
 		self.terminate_hits = cfg.getfloat("RENDER", "terminate_hits") or 0
@@ -41,7 +39,7 @@ class Camera:
 		self.objects = []
 
 	# Trace the pixel based on the given 2D direction which is used to calculate ray velocity from lens distorsion: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
-	def trace(self, dir_x: float, dir_y: float):
+	def trace(self, dir_x: float, dir_y: float, sample: int):
 		# Randomly offset the ray's angle based on the DOF setting, fetch its direction and use it as the ray velocity
 		# Velocity must be normalized as voxels need to be checked at all integer positions, the speed of light is always 1
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
@@ -109,8 +107,9 @@ class Camera:
 		return ray.col and ray.col.mix(rgb(0, 0, 0), 1 - ray.energy) or rgb(0, 0, 0)
 
 	# Called by threads with a thread ID indicating the tile number, creates a new surface for this thread to paint to which is returned to the main thread as a byte string
-	# The alpha channel is used to skip drawing unchanged pixels and apply the blur effect by reducing how much pixels on the image are blended to the canvas
-	def draw(self, thread):
+	# The alpha channel is used to skip drawing unchanged pixels
+	# If static noise is enabled, the random seed is set to an index unique to this pixel and sample so noise in ray calculations is static instead of flickering
+	def tile(self, thread: int, sample: int):
 		tile = pg.Surface((self.width, self.height), pg.HWSURFACE + pg.SRCALPHA)
 		lines = math.ceil(self.height / self.threads)
 		for x in range(self.width):
@@ -118,31 +117,14 @@ class Camera:
 			for y in range(lines):
 				y_line = y + (lines * thread)
 				dir_y = (-0.5 + y_line / self.height) * 2
-				colors = []
 
-				# Preform a trace for each sample and get its pixel color, the number of samples is the closest integer between the minimum and maximum random sample range
-				# If static noise is enabled, the random seed is set to an index unique to this pixel and sample so noise in ray calculations is static instead of flickering
-				samples = round(max(0, random.uniform(self.samples_min, self.samples_max)))
-				for i in range(samples):
-					if self.static:
-						random.seed(math.trunc(((1 + dir_x) * self.width) * ((1 + dir_y) * self.height) * (1 + i)))
-					colors.append(self.trace(dir_x, dir_y))
+				if self.static:
+					random.seed(math.trunc(((1 + dir_x) * self.width) * ((1 + dir_y) * self.height) * (1 + sample)))
+				col = self.trace(dir_x, dir_y, sample)
+				tile.set_at((x, y_line), col.tuple())
 				random.seed(None)
 
-				# Paint the pixel with the average color of all samples, skip updating this pixel if no samples were traced
-				if len(colors) > 0:
-					col_r = col_g = col_b = col_a = 0
-					for c in colors:
-						col_r += c.r
-						col_g += c.g
-						col_b += c.b
-					col_r = round(col_r / len(colors))
-					col_g = round(col_g / len(colors))
-					col_b = round(col_b / len(colors))
-					col_a = round(self.blur * 255)
-					tile.set_at((x, y_line), (col_r, col_g, col_b, col_a))
-
-		return pg.image.tobytes(tile, "RGBA")
+		return (sample, thread, pg.image.tobytes(tile, "RGBA"))
 
 	# Update the position and rotation this camera will shoot rays from
 	# Valid objects are compiled to an object list local to the camera which is used once per redraw
@@ -162,8 +144,8 @@ class Window:
 		self.scale = cfg.getint("WINDOW", "scale") or 8
 		self.smooth = cfg.getboolean("WINDOW", "smooth") or False
 		self.fps = cfg.getint("WINDOW", "fps") or 24
+		self.samples = cfg.getint("RENDER", "samples") or 1
 		self.threads = cfg.getint("RENDER", "threads") or mp.cpu_count()
-		self.threads_sync = cfg.getboolean("RENDER", "threads_sync") or False
 		self.speed_jump = cfg.getfloat("PHYSICS", "speed_jump") or 100
 		self.speed_move = cfg.getfloat("PHYSICS", "speed_move") or 10
 		self.speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 10
@@ -183,6 +165,15 @@ class Window:
 		self.mouselook = True
 		self.running = True
 
+		# Prepare the list of samples, each sample stores an image slot for every thread which is cleared after being drawn
+		self.tiles = []
+		for s in range(self.samples):
+			self.tiles.append([])
+			for t in range(self.threads):
+				surface = pg.Surface(self.rect.tuple(), pg.HWSURFACE)
+				image = pg.image.tobytes(surface, "RGBA")
+				self.tiles[s].append(image)
+
 		# Main loop, limited by FPS with a slower clock when the window isn't focused
 		while self.running:
 			self.update()
@@ -194,19 +185,10 @@ class Window:
 				self.pool.join()
 				exit
 
-	# Called by the thread pool on finish, contains a list of tiles to be added to the canvas
-	def update_draw(self, result):
-		tiles = []
-		for image in result:
-			srf = pg.image.frombytes(image, (self.width, self.height), "RGBA")
-			self.canvas.blit(srf, (0, 0))
-			tiles.append((srf, (0, 0)))
-
-		canvas = self.smooth and pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) or pg.transform.scale(self.canvas, self.rect_win.tuple())
-		text_info = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(self.fps) + " FPS"
-		text = self.font.render(text_info, True, (255, 255, 255))
-		self.screen.blit(canvas, (0, 0))
-		self.screen.blit(text, (0, 0))
+	# Called by the thread pool on finish, adds the image to the appropriate sample and thread for the main thread to mix
+	def update_tile(self, result):
+		sample, thread, image = result
+		self.tiles[sample][thread] = image
 
 	# Render a new frame from the perspective of the main object, handle object physics and player control
 	def update(self):
@@ -223,13 +205,28 @@ class Window:
 		units = self.clock.get_time() / 1000 * self.speed_move
 		units_jump = self.clock.get_time() / 1000 * self.speed_jump
 		units_mouse = self.speed_mouse / 1000
-
-		# Render: Request the camera to draw new tiles, the image of each tile is added to the canvas by the callback function of the pool
-		# If thread syncing is enabled the main thread waits for all rendering threads to finish before continuing
 		self.cam.move(obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z), obj_cam.rot)
-		result = self.pool.map_async(self.cam.draw, range(self.threads), callback = self.update_draw)
-		if self.threads_sync:
-			result.wait()
+
+		# Render: Request the camera to draw a new tile for each thread and sample, gradually blend thread samples that have finished to the canvas
+		for s in range(len(self.tiles)):
+			tiles = []
+			for t in range(len(self.tiles[s])):
+				if self.tiles[s][t]:
+					image = pg.image.frombytes(self.tiles[s][t], (self.width, self.height), "RGBA")
+					tiles.append((image, (0, 0)))
+					self.tiles[s][t] = None
+					self.pool.apply_async(self.cam.tile, args = (t, s,), callback = self.update_tile)
+			if tiles:
+				canvas = pg.Surface.copy(self.canvas)
+				canvas.blits(tiles)
+				self.canvas = pg.transform.average_surfaces([self.canvas, canvas])
+
+		# Render: Blit the total number of tiles that are waiting to the canvas, update and blit the info text on top
+		canvas = self.smooth and pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) or pg.transform.scale(self.canvas, self.rect_win.tuple())
+		text_info = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(self.fps) + " FPS"
+		text = self.font.render(text_info, True, (255, 255, 255))
+		self.screen.blit(canvas, (0, 0))
+		self.screen.blit(text, (0, 0))
 		pg.display.update()
 
 		# Input, mods: Acceleration
