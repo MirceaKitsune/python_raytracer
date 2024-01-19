@@ -224,19 +224,18 @@ class Object:
 
 	# Check whether another item intersects the bounding box of this object, pos_min and pos_max represent the corners of another box or a point if identical
 	def intersects(self, pos_min: vec3, pos_max: vec3):
-		return pos_min < self.maxs and pos_max > self.mins
+		return pos_min <= self.maxs and pos_max >= self.mins
 
 	# Change the virtual rotation of the object by the given amount, pitch is limited to the provided value
 	def rotate(self, rot: vec3, limit_pitch: float):
-		if rot.x != 0 or rot.y != 0 or rot.z != 0:
-			self.rot = self.rot.rotate(rot)
-			if limit_pitch:
-				pitch_min = max(180, 360 - limit_pitch)
-				pitch_max = min(180, limit_pitch)
-				if self.rot.y > pitch_max and self.rot.y <= 180:
-					self.rot.y = pitch_max
-				if self.rot.y < pitch_min and self.rot.y > 180:
-					self.rot.y = pitch_min
+		self.rot = self.rot.rotate(rot)
+		if limit_pitch:
+			pitch_min = max(180, 360 - limit_pitch)
+			pitch_max = min(180, limit_pitch)
+			if self.rot.y > pitch_max and self.rot.y <= 180:
+				self.rot.y = pitch_max
+			if self.rot.y < pitch_min and self.rot.y > 180:
+				self.rot.y = pitch_min
 
 	# Teleport the object to this origin, use only when necessary and prefer impulse instead
 	def move(self, pos):

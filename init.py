@@ -15,27 +15,38 @@ import data
 mod = len(sys.argv) > 1 and sys.argv[1].strip() or "default"
 cfg = configparser.RawConfigParser()
 cfg.read("mods/" + mod + "/config.cfg")
+settings = store(
+	width = cfg.getint("WINDOW", "width") or 96,
+	height = cfg.getint("WINDOW", "height") or 64,
+	scale = cfg.getint("WINDOW", "scale") or 8,
+	smooth = cfg.getboolean("WINDOW", "smooth") or False,
+	fps = cfg.getint("WINDOW", "fps") or 24,
+
+	ambient = cfg.getfloat("RENDER", "ambient") or 0,
+	static = cfg.getboolean("RENDER", "static") or False,
+	samples = cfg.getint("RENDER", "samples") or 1,
+	fov = cfg.getfloat("RENDER", "fov") or 90,
+	dof = cfg.getfloat("RENDER", "dof") or 0,
+	dist_min = cfg.getint("RENDER", "dist_min") or 0,
+	dist_max = cfg.getint("RENDER", "dist_max") or 48,
+	terminate_hits = cfg.getfloat("RENDER", "terminate_hits") or 0,
+	terminate_dist = cfg.getfloat("RENDER", "terminate_dist") or 0,
+	threads = cfg.getint("RENDER", "threads") or mp.cpu_count(),
+
+	speed_jump = cfg.getfloat("PHYSICS", "speed_jump") or 10,
+	speed_move = cfg.getfloat("PHYSICS", "speed_move") or 1,
+	speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 10,
+	max_pitch = cfg.getfloat("PHYSICS", "max_pitch") or 0,
+)
 
 # Camera: A subset of Window which only stores data needed for rendering and is used by threads, preforms ray tracing and draws tiles which are overlayed to the canvas by the main thread
 class Camera:
 	def __init__(self):
-		self.width = cfg.getint("WINDOW", "width") or 96
-		self.height = cfg.getint("WINDOW", "height") or 64
-		self.ambient = cfg.getfloat("RENDER", "ambient") or 0
-		self.static = cfg.getboolean("RENDER", "static") or False
-		self.samples = cfg.getint("RENDER", "samples") or 1
-		self.fov = cfg.getfloat("RENDER", "fov") or 90
-		self.dof = cfg.getfloat("RENDER", "dof") or 0
-		self.dist_min = cfg.getint("RENDER", "dist_min") or 0
-		self.dist_max = cfg.getint("RENDER", "dist_max") or 48
-		self.terminate_hits = cfg.getfloat("RENDER", "terminate_hits") or 0
-		self.terminate_dist = cfg.getfloat("RENDER", "terminate_dist") or 0
-		self.threads = cfg.getint("RENDER", "threads") or mp.cpu_count()
-
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
-		self.lens = self.fov * math.pi / 8
-		self.proportions = ((self.width + self.height) / 2) / max(self.width, self.height)
+		self.lines = math.ceil(settings.height / settings.threads)
+		self.proportions = ((settings.width + settings.height) / 2) / max(settings.width, settings.height)
+		self.lens = settings.fov * math.pi / 8
 		self.objects = []
 
 	# Trace the pixel based on the given 2D direction which is used to calculate ray velocity from lens distorsion: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
@@ -43,8 +54,8 @@ class Camera:
 		# Randomly offset the ray's angle based on the DOF setting, fetch its direction and use it as the ray velocity
 		# Velocity must be normalized as voxels need to be checked at all integer positions, the speed of light is always 1
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
-		lens_x = (dir_x / self.proportions) * self.lens + rand(self.dof)
-		lens_y = (dir_y * self.proportions) * self.lens + rand(self.dof)
+		lens_x = (dir_x / self.proportions) * self.lens + rand(settings.dof)
+		lens_y = (dir_y * self.proportions) * self.lens + rand(settings.dof)
 		ray_rot = self.rot.rotate(vec3(0, -lens_y, +lens_x))
 		ray_dir = ray_rot.dir(True)
 		ray_dir = ray_dir.normalize()
@@ -53,11 +64,11 @@ class Camera:
 		ray = store(
 			col = None,
 			absorption = 1,
-			energy = self.ambient,
-			pos = self.pos + ray_dir * self.dist_min,
+			energy = settings.ambient,
+			pos = self.pos + ray_dir * settings.dist_min,
 			vel = ray_dir,
 			step = 0,
-			life = self.dist_max - self.dist_min,
+			life = settings.dist_max - settings.dist_min,
 			hits = 0,
 		)
 
@@ -94,9 +105,9 @@ class Camera:
 						break
 
 			# Terminate this ray earlier in some circumstances to improve performance
-			if ray.hits and self.terminate_hits / ray.hits < random.random():
+			if ray.hits and settings.terminate_hits / ray.hits < random.random():
 				break
-			elif ray.step / ray.life > 1 - self.terminate_dist * random.random():
+			elif ray.step / ray.life > 1 - settings.terminate_dist * random.random():
 				break
 			ray.step += 1
 			ray.pos += ray.vel
@@ -110,21 +121,19 @@ class Camera:
 	# The alpha channel is used to skip drawing unchanged pixels
 	# If static noise is enabled, the random seed is set to an index unique to this pixel and sample so noise in ray calculations is static instead of flickering
 	def tile(self, thread: int, sample: int):
-		tile = pg.Surface((self.width, self.height), pg.HWSURFACE + pg.SRCALPHA)
-		lines = math.ceil(self.height / self.threads)
-		for x in range(self.width):
-			dir_x = (-0.5 + x / self.width) * 2
-			for y in range(lines):
-				y_line = y + (lines * thread)
-				dir_y = (-0.5 + y_line / self.height) * 2
+		tile = pg.Surface((settings.width, self.lines), pg.HWSURFACE)
+		for x in range(settings.width):
+			dir_x = (-0.5 + x / settings.width) * 2
+			for y in range(self.lines):
+				y_line = y + (self.lines * thread)
+				dir_y = (-0.5 + y_line / settings.height) * 2
 
-				if self.static:
-					random.seed(math.trunc(((1 + dir_x) * self.width) * ((1 + dir_y) * self.height) * (1 + sample)))
-				col = self.trace(dir_x, dir_y, sample)
-				tile.set_at((x, y_line), col.tuple())
+				if settings.static:
+					random.seed((1 + x) * (1 + y_line) * (1 + sample))
+				tile.set_at((x, y), self.trace(dir_x, dir_y, sample).tuple())
 				random.seed(None)
 
-		return (sample, thread, pg.image.tobytes(tile, "RGBA"))
+		return (sample, thread, pg.image.tobytes(tile, "RGB"))
 
 	# Update the position and rotation this camera will shoot rays from
 	# Valid objects are compiled to an object list local to the camera which is used once per redraw
@@ -133,53 +142,41 @@ class Camera:
 		self.rot = rot
 		self.objects = []
 		for obj in data.objects:
-			if obj.sprites[0] and math.dist(obj.pos.array(), self.pos.array()) <= self.dist_max + obj.size.max():
+			if obj.sprites[0] and math.dist(obj.pos.array(), self.pos.array()) <= settings.dist_max + obj.size.max():
 				self.objects.append(obj)
 
 # Window: Initializes Pygame and starts the main loop, handles all updates and redraws the canvas using a Camera instance
 class Window:
 	def __init__(self):
-		self.width = cfg.getint("WINDOW", "width") or 96
-		self.height = cfg.getint("WINDOW", "height") or 64
-		self.scale = cfg.getint("WINDOW", "scale") or 8
-		self.smooth = cfg.getboolean("WINDOW", "smooth") or False
-		self.fps = cfg.getint("WINDOW", "fps") or 24
-		self.samples = cfg.getint("RENDER", "samples") or 1
-		self.threads = cfg.getint("RENDER", "threads") or mp.cpu_count()
-		self.speed_jump = cfg.getfloat("PHYSICS", "speed_jump") or 100
-		self.speed_move = cfg.getfloat("PHYSICS", "speed_move") or 10
-		self.speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 10
-		self.max_pitch = cfg.getfloat("PHYSICS", "max_pitch") or 0
-
 		# Configure Pygame and the main screen as well as the camera and thread pool that will be used to update the window
 		pg.init()
 		pg.display.set_caption("Voxel Tracer")
-		self.rect = vec2(self.width, self.height)
-		self.rect_win = self.rect * self.scale
+		self.rect = vec2(settings.width, settings.height)
+		self.rect_win = self.rect * settings.scale
+		self.lines = math.ceil(settings.height / settings.threads)
 		self.screen = pg.display.set_mode(self.rect_win.tuple(), pg.HWSURFACE)
 		self.canvas = pg.Surface(self.rect.tuple(), pg.HWSURFACE)
 		self.font = pg.font.SysFont(None, 24)
 		self.clock = pg.time.Clock()
-		self.pool = mp.Pool(processes = self.threads)
+		self.pool = mp.Pool(processes = settings.threads)
 		self.cam = Camera()
 		self.mouselook = True
 		self.running = True
 
 		# Prepare the list of samples, each sample stores an image slot for every thread which is cleared after being drawn
 		self.tiles = []
-		for s in range(self.samples):
+		for s in range(settings.samples):
 			self.tiles.append([])
-			for t in range(self.threads):
-				surface = pg.Surface(self.rect.tuple(), pg.HWSURFACE)
-				image = pg.image.tobytes(surface, "RGBA")
+			for t in range(settings.threads):
+				surface = pg.Surface((settings.width, self.lines), pg.HWSURFACE)
+				image = pg.image.tobytes(surface, "RGB")
 				self.tiles[s].append(image)
 
 		# Main loop, limited by FPS with a slower clock when the window isn't focused
 		while self.running:
-			self.update()
-			fps = pg.mouse.get_focused() and self.fps or math.trunc(self.fps / 5)
+			fps = pg.mouse.get_focused() and settings.fps or math.trunc(settings.fps / 5)
 			self.clock.tick(fps)
-
+			self.update()
 			if not self.running:
 				self.pool.close()
 				self.pool.join()
@@ -202,28 +199,31 @@ class Window:
 		keys = pg.key.get_pressed()
 		mods = pg.key.get_mods()
 		d = obj_cam.rot.dir(False)
-		units = self.clock.get_time() / 1000 * self.speed_move
-		units_jump = self.clock.get_time() / 1000 * self.speed_jump
-		units_mouse = self.speed_mouse / 1000
+		units = self.clock.get_time() / 1000 * settings.speed_move
+		units_jump = self.clock.get_time() / 1000 * settings.speed_jump
+		units_mouse = settings.speed_mouse / 1000
 		self.cam.move(obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z), obj_cam.rot)
 
 		# Render: Request the camera to draw a new tile for each thread and sample, gradually blend thread samples that have finished to the canvas
+		samples = []
 		for s in range(len(self.tiles)):
 			tiles = []
 			for t in range(len(self.tiles[s])):
 				if self.tiles[s][t]:
-					image = pg.image.frombytes(self.tiles[s][t], (self.width, self.height), "RGBA")
-					tiles.append((image, (0, 0)))
+					image = pg.image.frombytes(self.tiles[s][t], (settings.width, self.lines), "RGB")
+					tiles.append((image, (0, t * self.lines)))
 					self.tiles[s][t] = None
 					self.pool.apply_async(self.cam.tile, args = (t, s,), callback = self.update_tile)
 			if tiles:
 				canvas = pg.Surface.copy(self.canvas)
 				canvas.blits(tiles)
-				self.canvas = pg.transform.average_surfaces([self.canvas, canvas])
+				samples.append(canvas)
+		if samples:
+			self.canvas = pg.transform.average_surfaces(samples)
 
 		# Render: Blit the total number of tiles that are waiting to the canvas, update and blit the info text on top
-		canvas = self.smooth and pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) or pg.transform.scale(self.canvas, self.rect_win.tuple())
-		text_info = str(self.width) + " x " + str(self.height) + " (" + str(self.width * self.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(self.fps) + " FPS"
+		canvas = settings.smooth and pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) or pg.transform.scale(self.canvas, self.rect_win.tuple())
+		text_info = str(settings.width) + " x " + str(settings.height) + " (" + str(settings.width * settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(settings.fps) + " FPS"
 		text = self.font.render(text_info, True, (255, 255, 255))
 		self.screen.blit(canvas, (0, 0))
 		self.screen.blit(text, (0, 0))
@@ -251,7 +251,7 @@ class Window:
 				x, y = pg.mouse.get_pos()
 				ofs = vec2(center.x - x, center.y - y)
 				rot = vec3(0, +ofs.y, -ofs.x)
-				obj_cam.rotate(rot * units_mouse, self.max_pitch)
+				obj_cam.rotate(rot * units_mouse, settings.max_pitch)
 				pg.mouse.set_pos((center.x, center.y))
 
 		# Input, ongoing events: Camera movement, camera rotation
@@ -263,18 +263,18 @@ class Window:
 			obj_cam.impulse(vec3(-d.z, 0, +d.x) * units)
 		if keys[pg.K_d]:
 			obj_cam.impulse(vec3(+d.z, 0, -d.x) * units)
-		if keys[pg.K_r]:
+		if keys[pg.K_r] or keys[pg.K_SPACE]:
 			obj_cam.impulse(vec3(0, +1, 0) * units_jump)
-		if keys[pg.K_f]:
+		if keys[pg.K_f] or keys[pg.K_LCTRL]:
 			obj_cam.impulse(vec3(0, -1, 0) * units_jump)
 		if keys[pg.K_UP]:
-			obj_cam.rotate(vec3(0, +5, 0) * units, self.max_pitch)
+			obj_cam.rotate(vec3(0, +5, 0) * units, settings.max_pitch)
 		if keys[pg.K_DOWN]:
-			obj_cam.rotate(vec3(0, -5, 0) * units, self.max_pitch)
+			obj_cam.rotate(vec3(0, -5, 0) * units, settings.max_pitch)
 		if keys[pg.K_LEFT]:
-			obj_cam.rotate(vec3(0, 0, -5) * units, self.max_pitch)
+			obj_cam.rotate(vec3(0, 0, -5) * units, settings.max_pitch)
 		if keys[pg.K_RIGHT]:
-			obj_cam.rotate(vec3(0, 0, +5) * units, self.max_pitch)
+			obj_cam.rotate(vec3(0, 0, +5) * units, settings.max_pitch)
 
 # Import the init script of the mod and create the main window
 importlib.import_module("mods." + mod + ".init")
