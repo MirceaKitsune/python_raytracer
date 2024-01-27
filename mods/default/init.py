@@ -74,7 +74,7 @@ mat_light = data.Material(
 	roughness = 0,
 	absorption = 1,
 	ior = 1,
-	energy = 0.5,
+	energy = 2.5,
 	solidity = 1,
 	weight = 0,
 	friction = 0.125,
@@ -96,4 +96,4 @@ obj_player = data.Object(pos = vec3(0, -8, 0), rot = vec3(0, 0, 0), vel = vec3(0
 obj_player.set_sprite(spr_player)
 obj_player.set_camera(vec2(2, 4))
 
-data.background = material_sky
+data.background = material_background

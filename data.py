@@ -39,11 +39,11 @@ class Frame:
 
 	def get_voxel(self, pos: vec3):
 		pos_x = math.trunc(pos.x)
-		if pos_x in self.data:
+		if self.data and pos_x in self.data:
 			pos_y = math.trunc(pos.y)
-			if pos_y in self.data[pos_x]:
+			if self.data[pos_x] and pos_y in self.data[pos_x]:
 				pos_z = math.trunc(pos.z)
-				if pos_z in self.data[pos_x][pos_y]:
+				if self.data[pos_x][pos_y] and pos_z in self.data[pos_x][pos_y]:
 					return self.data[pos_x][pos_y][pos_z]
 		return None
 

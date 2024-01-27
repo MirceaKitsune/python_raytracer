@@ -22,13 +22,15 @@ settings = store(
 	smooth = cfg.getboolean("WINDOW", "smooth") or False,
 	fps = cfg.getint("WINDOW", "fps") or 24,
 
-	ambient = cfg.getfloat("RENDER", "ambient") or 0,
 	static = cfg.getboolean("RENDER", "static") or False,
 	samples = cfg.getint("RENDER", "samples") or 1,
 	fov = cfg.getfloat("RENDER", "fov") or 90,
+	falloff = cfg.getfloat("RENDER", "falloff") or 0,
 	dof = cfg.getfloat("RENDER", "dof") or 0,
+	skip = cfg.getfloat("RENDER", "skip") or 0,
 	dist_min = cfg.getint("RENDER", "dist_min") or 0,
 	dist_max = cfg.getint("RENDER", "dist_max") or 48,
+	terminate_color = cfg.getfloat("RENDER", "terminate_color") or 0,
 	terminate_hits = cfg.getfloat("RENDER", "terminate_hits") or 0,
 	terminate_dist = cfg.getfloat("RENDER", "terminate_dist") or 0,
 	threads = cfg.getint("RENDER", "threads") or mp.cpu_count(),
@@ -50,7 +52,7 @@ class Camera:
 		self.objects = []
 
 	# Trace the pixel based on the given 2D direction which is used to calculate ray velocity from lens distorsion: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
-	def trace(self, dir_x: float, dir_y: float, sample: int):
+	def trace(self, dir_x: float, dir_y: float, sample: int, color: rgb):
 		# Randomly offset the ray's angle based on the DOF setting, fetch its direction and use it as the ray velocity
 		# Velocity must be normalized as voxels need to be checked at all integer positions, the speed of light is always 1
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
@@ -62,9 +64,8 @@ class Camera:
 
 		# Ray data is kept in a data store so it can be easily delivered to material functions and support custom properties
 		ray = store(
-			col = None,
-			absorption = 1,
-			energy = settings.ambient,
+			color = color,
+			energy = 0,
 			pos = self.pos + ray_dir * settings.dist_min,
 			vel = ray_dir,
 			step = 0,
@@ -76,6 +77,7 @@ class Camera:
 		# If a material is found, its function is called which can modify any of the ray properties provided
 		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
 		while ray.step < ray.life:
+			col_diff = 1
 			for obj in self.objects:
 				if obj.intersects(ray.pos, ray.pos):
 					spr = obj.get_sprite()
@@ -100,12 +102,16 @@ class Camera:
 								ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
 
 						# Call the material function, normalize ray velocity after making changes to ensure the speed of light remains 1 and future voxels aren't skipped or calculated twice
-						mat.function(ray, mat)
+						# Store the overall color difference between the old pixel and current ray color
+						mat.function(ray, mat, settings)
 						ray.vel = ray.vel.normalize()
+						col_diff = max(abs(color.r - ray.color.r) / 255, abs(color.g - ray.color.g) / 255, abs(color.b - ray.color.b) / 255)
 						break
 
 			# Terminate this ray earlier in some circumstances to improve performance
-			if ray.hits and settings.terminate_hits / ray.hits < random.random():
+			if col_diff < settings.terminate_color * ray.hits:
+				break
+			elif ray.hits and settings.terminate_hits / ray.hits < random.random():
 				break
 			elif ray.step / ray.life > 1 - settings.terminate_dist * random.random():
 				break
@@ -114,26 +120,27 @@ class Camera:
 
 		# Run the background function and return the resulting color, fall back to black if a color wasn't set
 		if data.background:
-			data.background(ray)
-		return ray.col and ray.col.mix(rgb(0, 0, 0), 1 - ray.energy) or rgb(0, 0, 0)
+			data.background(ray, settings)
+		return ray.color
 
-	# Called by threads with a thread ID indicating the tile number, creates a new surface for this thread to paint to which is returned to the main thread as a byte string
-	# The alpha channel is used to skip drawing unchanged pixels
+	# Called by threads with a tile image to paint to, creates a new surface for this thread to paint to which is returned to the main thread as a byte string
 	# If static noise is enabled, the random seed is set to an index unique to this pixel and sample so noise in ray calculations is static instead of flickering
-	def tile(self, thread: int, sample: int):
-		tile = pg.Surface((settings.width, self.lines), pg.HWSURFACE)
+	def tile(self, image: str, sample: int, thread: int):
+		tile = pg.image.frombytes(image, (settings.width, self.lines), "RGB")
 		for x in range(settings.width):
-			dir_x = (-0.5 + x / settings.width) * 2
 			for y in range(self.lines):
-				y_line = y + (self.lines * thread)
-				dir_y = (-0.5 + y_line / settings.height) * 2
+				if settings.skip < random.random():
+					line_y = y + (self.lines * thread)
+					dir_x = (-0.5 + x / settings.width) * 2
+					dir_y = (-0.5 + line_y / settings.height) * 2
+					r, g, b, a = tile.get_at((x, y))
 
-				if settings.static:
-					random.seed((1 + x) * (1 + y_line) * (1 + sample))
-				tile.set_at((x, y), self.trace(dir_x, dir_y, sample).tuple())
-				random.seed(None)
+					if settings.static:
+						random.seed((1 + x) * (1 + line_y) * (1 + sample))
+					tile.set_at((x, y), self.trace(dir_x, dir_y, sample, rgb(r, g, b)).tuple())
+					random.seed(None)
 
-		return (sample, thread, pg.image.tobytes(tile, "RGB"))
+		return (pg.image.tobytes(tile, "RGB"), sample, thread)
 
 	# Update the position and rotation this camera will shoot rays from
 	# Valid objects are compiled to an object list local to the camera which is used once per redraw
@@ -184,7 +191,7 @@ class Window:
 
 	# Called by the thread pool on finish, adds the image to the appropriate sample and thread for the main thread to mix
 	def update_tile(self, result):
-		sample, thread, image = result
+		image, sample, thread = result
 		self.tiles[sample][thread] = image
 
 	# Render a new frame from the perspective of the main object, handle object physics and player control
@@ -210,16 +217,14 @@ class Window:
 			tiles = []
 			for t in range(len(self.tiles[s])):
 				if self.tiles[s][t]:
-					image = pg.image.frombytes(self.tiles[s][t], (settings.width, self.lines), "RGB")
-					tiles.append((image, (0, t * self.lines)))
+					tile = pg.image.frombytes(self.tiles[s][t], (settings.width, self.lines), "RGB")
+					tiles.append((tile, (0, t * self.lines)))
+					self.pool.apply_async(self.cam.tile, args = (self.tiles[s][t], s, t,), callback = self.update_tile)
 					self.tiles[s][t] = None
-					self.pool.apply_async(self.cam.tile, args = (t, s,), callback = self.update_tile)
-			if tiles:
-				canvas = pg.Surface.copy(self.canvas)
-				canvas.blits(tiles)
-				samples.append(canvas)
-		if samples:
-			self.canvas = pg.transform.average_surfaces(samples)
+			sample = pg.Surface.copy(self.canvas)
+			sample.blits(tiles)
+			samples.append(sample)
+		self.canvas = pg.transform.average_surfaces(samples)
 
 		# Render: Blit the total number of tiles that are waiting to the canvas, update and blit the info text on top
 		canvas = settings.smooth and pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) or pg.transform.scale(self.canvas, self.rect_win.tuple())
