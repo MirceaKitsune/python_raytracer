@@ -24,49 +24,30 @@ class Material:
 # Frame: A subset of Sprite, stores instances of Material in 3D space for a single model using dictionary stacks of the form [x][y][z] = item
 class Frame:
 	def __init__(self):
-		self.data = {}
+		self.clear()
 
 	def clear(self):
 		self.data = {}
 
 	def get_voxels(self):
 		items = []
-		for x in self.data:
-			for y in self.data[x]:
-				for z in self.data[x][y]:
-					items.append((vec3(x, y, z), self.data[x][y][z]))
+		for pos in self.data:
+			x, y, z = pos
+			items.append((vec3(x, y, z), self.data[pos]))
 		return items
 
 	def get_voxel(self, pos: vec3):
-		pos_x = math.trunc(pos.x)
-		if self.data and pos_x in self.data:
-			pos_y = math.trunc(pos.y)
-			if self.data[pos_x] and pos_y in self.data[pos_x]:
-				pos_z = math.trunc(pos.z)
-				if self.data[pos_x][pos_y] and pos_z in self.data[pos_x][pos_y]:
-					return self.data[pos_x][pos_y][pos_z]
+		index = math.trunc(pos).tuple()
+		if index in self.data:
+			return self.data[index]
 		return None
 
-	# Axis storage is added or removed based on which entries are needed, each stack is deleted if the last entry on that axis has been removed
 	def set_voxel(self, pos: vec3, mat: Material):
-		pos_x = math.trunc(pos.x)
-		pos_y = math.trunc(pos.y)
-		pos_z = math.trunc(pos.z)
+		index = math.trunc(pos).tuple()
 		if mat:
-			if not pos_x in self.data:
-				self.data[pos_x] = {}
-			if not pos_y in self.data[pos_x]:
-				self.data[pos_x][pos_y] = {}
-			self.data[pos_x][pos_y][pos_z] = mat
+			self.data[index] = mat
 		else:
-			if pos_x in self.data:
-				if not self.data[pos_x]:
-					del self.data[pos_x]
-				elif pos_y in self.data[pos_x]:
-					if not self.data[pos_x][pos_y]:
-						del self.data[pos_x][pos_y]
-					elif pos_z in self.data[pos_x][pos_y]:
-						del self.data[pos_x][pos_y][pos_z]
+			del self.data[index]
 
 # Sprite: A subset of Object, stores multiple instances of Frame which can be animated or transformed to produce an usable 3D image
 class Sprite:

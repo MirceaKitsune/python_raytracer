@@ -30,7 +30,6 @@ settings = store(
 	skip = cfg.getfloat("RENDER", "skip") or 0,
 	dist_min = cfg.getint("RENDER", "dist_min") or 0,
 	dist_max = cfg.getint("RENDER", "dist_max") or 48,
-	terminate_color = cfg.getfloat("RENDER", "terminate_color") or 0,
 	terminate_hits = cfg.getfloat("RENDER", "terminate_hits") or 0,
 	terminate_dist = cfg.getfloat("RENDER", "terminate_dist") or 0,
 	threads = cfg.getint("RENDER", "threads") or mp.cpu_count(),
@@ -52,7 +51,7 @@ class Camera:
 		self.objects = []
 
 	# Trace the pixel based on the given 2D direction which is used to calculate ray velocity from lens distorsion: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
-	def trace(self, dir_x: float, dir_y: float, sample: int, color: rgb):
+	def trace(self, dir_x: float, dir_y: float, sample: int):
 		# Randomly offset the ray's angle based on the DOF setting, fetch its direction and use it as the ray velocity
 		# Velocity must be normalized as voxels need to be checked at all integer positions, the speed of light is always 1
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
@@ -64,7 +63,7 @@ class Camera:
 
 		# Ray data is kept in a data store so it can be easily delivered to material functions and support custom properties
 		ray = store(
-			color = color,
+			color = rgb(0, 0, 0),
 			energy = 0,
 			pos = self.pos + ray_dir * settings.dist_min,
 			vel = ray_dir,
@@ -77,7 +76,6 @@ class Camera:
 		# If a material is found, its function is called which can modify any of the ray properties provided
 		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
 		while ray.step < ray.life:
-			col_diff = 1
 			for obj in self.objects:
 				if obj.intersects(ray.pos, ray.pos):
 					spr = obj.get_sprite()
@@ -88,12 +86,12 @@ class Camera:
 						# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
 						if mat.ior:
 							direction = (mat.ior - 0.5) * 2
-							ofs_x = ray.vel.x * direction < 0 and vec3(-1, 0, 0) or vec3(+1, 0, 0)
-							ofs_y = ray.vel.y * direction < 0 and vec3(0, -1, 0) or vec3(0, +1, 0)
-							ofs_z = ray.vel.z * direction < 0 and vec3(0, 0, -1) or vec3(0, 0, +1)
-							mat_x = spr.get_voxel(None, obj.maxs - ray.pos + ofs_x)
-							mat_y = spr.get_voxel(None, obj.maxs - ray.pos + ofs_y)
-							mat_z = spr.get_voxel(None, obj.maxs - ray.pos + ofs_z)
+							dir_x = ray.vel.x * direction < 0 and vec3(-1, 0, 0) or vec3(+1, 0, 0)
+							dir_y = ray.vel.y * direction < 0 and vec3(0, -1, 0) or vec3(0, +1, 0)
+							dir_z = ray.vel.z * direction < 0 and vec3(0, 0, -1) or vec3(0, 0, +1)
+							mat_x = spr.get_voxel(None, obj.maxs - ray.pos + dir_x)
+							mat_y = spr.get_voxel(None, obj.maxs - ray.pos + dir_y)
+							mat_z = spr.get_voxel(None, obj.maxs - ray.pos + dir_z)
 							if not (mat_x and mat_x.ior == mat.ior):
 								ray.vel.x = mix(+ray.vel.x, -ray.vel.x, mat.ior)
 							if not (mat_y and mat_y.ior == mat.ior):
@@ -102,16 +100,12 @@ class Camera:
 								ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
 
 						# Call the material function, normalize ray velocity after making changes to ensure the speed of light remains 1 and future voxels aren't skipped or calculated twice
-						# Store the overall color difference between the old pixel and current ray color
 						mat.function(ray, mat, settings)
 						ray.vel = ray.vel.normalize()
-						col_diff = max(abs(color.r - ray.color.r) / 255, abs(color.g - ray.color.g) / 255, abs(color.b - ray.color.b) / 255)
 						break
 
 			# Terminate this ray earlier in some circumstances to improve performance
-			if col_diff < settings.terminate_color * ray.hits:
-				break
-			elif ray.hits and settings.terminate_hits / ray.hits < random.random():
+			if ray.hits and settings.terminate_hits / ray.hits < random.random():
 				break
 			elif ray.step / ray.life > 1 - settings.terminate_dist * random.random():
 				break
@@ -133,11 +127,10 @@ class Camera:
 					line_y = y + (self.lines * thread)
 					dir_x = (-0.5 + x / settings.width) * 2
 					dir_y = (-0.5 + line_y / settings.height) * 2
-					r, g, b, a = tile.get_at((x, y))
 
 					if settings.static:
 						random.seed((1 + x) * (1 + line_y) * (1 + sample))
-					tile.set_at((x, y), self.trace(dir_x, dir_y, sample, rgb(r, g, b)).tuple())
+					tile.set_at((x, y), self.trace(dir_x, dir_y, sample).tuple())
 					random.seed(None)
 
 		return (pg.image.tobytes(tile, "RGB"), sample, thread)
