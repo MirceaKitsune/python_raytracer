@@ -1,13 +1,47 @@
 #!/usr/bin/python3
 from lib import *
+import multiprocessing as mp
 
+import configparser
+import importlib
 import copy
 import math
 
 import pygame as pg
 
-# Variables for global instances such as objects, accessed by the window and camera
+# Fetch the mod name and load the config from the mod path
+mod = len(sys.argv) > 1 and sys.argv[1].strip() or "default"
+cfg = configparser.RawConfigParser()
+cfg.read("mods/" + mod + "/config.cfg")
+settings = store(
+	width = cfg.getint("WINDOW", "width") or 96,
+	height = cfg.getint("WINDOW", "height") or 64,
+	scale = cfg.getint("WINDOW", "scale") or 8,
+	smooth = cfg.getboolean("WINDOW", "smooth") or False,
+	fps = cfg.getint("WINDOW", "fps") or 24,
+
+	static = cfg.getboolean("RENDER", "static") or False,
+	samples = cfg.getint("RENDER", "samples") or 1,
+	fov = cfg.getfloat("RENDER", "fov") or 90,
+	falloff = cfg.getfloat("RENDER", "falloff") or 0,
+	chunk_size = cfg.getint("RENDER", "chunk_size") or 16,
+	dof = cfg.getfloat("RENDER", "dof") or 0,
+	skip = cfg.getfloat("RENDER", "skip") or 0,
+	dist_min = cfg.getint("RENDER", "dist_min") or 0,
+	dist_max = cfg.getint("RENDER", "dist_max") or 48,
+	terminate_hits = cfg.getfloat("RENDER", "terminate_hits") or 0,
+	terminate_dist = cfg.getfloat("RENDER", "terminate_dist") or 0,
+	threads = cfg.getint("RENDER", "threads") or mp.cpu_count(),
+
+	speed_jump = cfg.getfloat("PHYSICS", "speed_jump") or 10,
+	speed_move = cfg.getfloat("PHYSICS", "speed_move") or 1,
+	speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 10,
+	max_pitch = cfg.getfloat("PHYSICS", "max_pitch") or 0,
+)
+
+# Variables for global instances such as objects and chunk updates, accessed by the window and camera
 objects = []
+objects_chunks_update = []
 background = None
 
 # Material: A subset of Frame, used to store the physical properties of a virtual atom
@@ -21,7 +55,7 @@ class Material:
 	def clone(self):
 		return copy.deepcopy(self)
 
-# Frame: A subset of Sprite, stores instances of Material in 3D space for a single model using dictionary stacks of the form [x][y][z] = item
+# Frame: A subset of Sprite, also used by camera chunks to store render data, stores instances of Material to describe a single 3D model
 class Frame:
 	def __init__(self):
 		self.clear()
@@ -31,23 +65,22 @@ class Frame:
 
 	def get_voxels(self):
 		items = []
-		for pos in self.data:
-			x, y, z = pos
-			items.append((vec3(x, y, z), self.data[pos]))
+		for post in self.data:
+			items.append((vec3(post[0], post[1], post[2]), self.data[post]))
 		return items
 
 	def get_voxel(self, pos: vec3):
-		index = math.trunc(pos).tuple()
-		if index in self.data:
-			return self.data[index]
+		post = pos.tuple()
+		if post in self.data:
+			return self.data[post]
 		return None
 
 	def set_voxel(self, pos: vec3, mat: Material):
-		index = math.trunc(pos).tuple()
+		post = pos.tuple()
 		if mat:
-			self.data[index] = mat
+			self.data[post] = mat
 		else:
-			del self.data[index]
+			del self.data[post]
 
 # Sprite: A subset of Object, stores multiple instances of Frame which can be animated or transformed to produce an usable 3D image
 class Sprite:
@@ -61,7 +94,7 @@ class Sprite:
 			self.size.z = math.trunc(self.size.z) % 2 != 0 and math.trunc(self.size.z) + 1 or math.trunc(self.size.z)
 
 		# Animation properties and the frame list used to store multiple voxel meshes representing animation frames
-		self.frame_start = self.frame_end = self.frame_time = 0
+		self.frame = self.frame_time = self.frame_start = self.frame_end = 0
 		self.frames = []
 		for i in range(settings["frames"]):
 			self.frames.append(Frame())
@@ -70,23 +103,18 @@ class Sprite:
 	def clone(self):
 		return copy.deepcopy(self)
 
-	# Clear all voxels on the given frame
-	def clear(self, frame: int):
-		voxels = self.frames[frame]
-		voxels.clear()
-
 	# Set the animation range and speed at which it should be played
 	# If animation time is negative the animation will play backwards
 	def anim_set(self, frame_start: int, frame_end: int, frame_time: float):
+		self.frame = 0
+		self.frame_time = frame_time * 1000
 		self.frame_start = min(frame_start, len(self.frames))
 		self.frame_end = min(frame_end, len(self.frames))
-		self.frame_time = frame_time * 1000
 
-	# Returns the animation frame that should currently be displayed based on the time
-	def anim_frame(self):
+	# Updates the animation frame that should currently be displayed based on the time
+	def anim_update(self):
 		if self.frame_time and len(self.frames) > 1:
-			return math.trunc(self.frame_start + (pg.time.get_ticks() // self.frame_time) % (self.frame_end - self.frame_start))
-		return 0
+			self.frame = math.trunc(self.frame_start + (pg.time.get_ticks() // self.frame_time) % (self.frame_end - self.frame_start))
 
 	# Get the sprites for all rotations of this sprite based on its original rotation
 	# Storing the result at startup is recommended to avoid costly data duplication at runtime, but the result can be parsed as object.set_sprite(*sprite.get_rotations())
@@ -168,13 +196,18 @@ class Sprite:
 	# Position is in local space, always convert the position to local coordinates before calling this
 	# Frame can be None to retreive the active frame instead of a specific frame, use this when drawing the sprite
 	def get_voxel(self, frame: int, pos: vec3):
-		voxels = frame is not None and self.frames[frame] or self.frames[self.anim_frame()]
+		voxels = frame is not None and self.frames[frame] or self.frames[self.frame]
 		return voxels.get_voxel(pos)
 
 	# Return a list of all voxels on the appropriate frame
 	def get_voxels(self, frame: int):
-		voxels = frame is not None and self.frames[frame] or self.frames[self.anim_frame()]
+		voxels = frame is not None and self.frames[frame] or self.frames[self.frame]
 		return voxels.get_voxels()
+
+	# Clear all voxels on the given frame
+	def clear(self, frame: int):
+		voxels = frame is not None and self.frames[frame] or self.frames[self.frame]
+		voxels.clear()
 
 # Object: The base class for objects in the world, uses up to 4 instances of Sprite representing different rotation angles
 class Object:
@@ -197,11 +230,25 @@ class Object:
 
 	# Disable this object and remove it from the global object list
 	def remove(self):
+		self.area_update()
 		objects.remove(self)
 
 	# Create a copy of this object that can be edited independently
 	def clone(self):
 		return copy.deepcopy(self)
+
+	# Mark that chunks touching the sprite of this object need to be recalculated by the renderer, used when the object's sprite or position changes
+	# If the object moved or its sprite size has changed, this must be ran both before and after the change as to refresh chunks in both cases
+	def area_update(self):
+		if self.mins < self.maxs:
+			pos_min = self.mins.snapped(settings.chunk_size, -1) + round(settings.chunk_size / 2)
+			pos_max = self.maxs.snapped(settings.chunk_size, +1) + round(settings.chunk_size / 2)
+			for x in range(pos_min.x, pos_max.x, settings.chunk_size):
+				for y in range(pos_min.y, pos_max.y, settings.chunk_size):
+					for z in range(pos_min.z, pos_max.z, settings.chunk_size):
+						pos = vec3(x, y, z)
+						if not pos in objects_chunks_update:
+							objects_chunks_update.append(pos)
 
 	# Check whether another item intersects the bounding box of this object, pos_min and pos_max represent the corners of another box or a point if identical
 	def intersects(self, pos_min: vec3, pos_max: vec3):
@@ -209,20 +256,31 @@ class Object:
 
 	# Change the virtual rotation of the object by the given amount, pitch is limited to the provided value
 	def rotate(self, rot: vec3, limit_pitch: float):
-		self.rot = self.rot.rotate(rot)
-		if limit_pitch:
-			pitch_min = max(180, 360 - limit_pitch)
-			pitch_max = min(180, limit_pitch)
-			if self.rot.y > pitch_max and self.rot.y <= 180:
-				self.rot.y = pitch_max
-			if self.rot.y < pitch_min and self.rot.y > 180:
-				self.rot.y = pitch_min
+		if rot != 0:
+			# Trigger a renderer update if this rotation changed the sprite angle
+			angle_old = round(self.rot.z / 90) % 4
+			self.rot = self.rot.rotate(rot)
+			angle_new = round(self.rot.z / 90) % 4
+			if angle_new != angle_old and self.sprites[angle_new] and self.sprites[angle_old]:
+				self.area_update()
+
+			# Limit the pitch for special objects such as the player camera
+			if limit_pitch:
+				pitch_min = max(180, 360 - limit_pitch)
+				pitch_max = min(180, limit_pitch)
+				if self.rot.y > pitch_max and self.rot.y <= 180:
+					self.rot.y = pitch_max
+				if self.rot.y < pitch_min and self.rot.y > 180:
+					self.rot.y = pitch_min
 
 	# Teleport the object to this origin, use only when necessary and prefer impulse instead
 	def move(self, pos):
-		self.pos = math.trunc(pos)
-		self.mins = self.pos - self.size
-		self.maxs = self.pos + self.size
+		if pos != self.pos:
+			self.area_update()
+			self.pos = math.trunc(pos)
+			self.mins = self.pos - self.size
+			self.maxs = self.pos + self.size
+			self.area_update()
 
 	# Add velocity to this object, 1 is the maximum speed allowed for objects
 	def impulse(self, vel):
@@ -231,65 +289,74 @@ class Object:
 
 	# Physics function, applies velocity accounting for collisions with other objects and moves this object to the nearest empty space if one is available
 	def physics(self, time: float):
-		if self.actor and self.sprites[0]:
-			# List of offsets used to calculate neighboring object positions in order: Current position, -X, +X, -Y, +Y, -Z, +Z
-			offset = [vec3(0, 0, 0), vec3(-1, 0, 0), vec3(+1, 0, 0), vec3(0, -1, 0), vec3(0, +1, 0), vec3(0, 0, -1), vec3(0, 0, +1)]
-			offset_free = [True] * len(offset)
-			offset_desired = [False] * len(offset)
-			weight = friction = elasticity = 0
-
-			# Check at which neighboring positions any voxel in this object overlaps that of other objects to determine which locations are free
-			# The check is also used to estimate friction and elasticity, by comparing the values of all voxels that would touch at any position
+		if self.visible():
+			# Update the animation frame on the active sprite, if the frame changed trigger a renderer update
 			self_spr = self.get_sprite()
-			for pos, mat in self_spr.get_voxels(None):
-				weight += mat.weight
-			for obj in objects:
-				if obj != self and obj.sprites[0] and obj.intersects(self.mins - 1, self.maxs + 1):
-					obj_spr = obj.get_sprite()
-					for x in range(self.mins.x - 1, self.maxs.x + 2):
-						for y in range(self.mins.y - 1, self.maxs.y + 2):
-							for z in range(self.mins.z - 1, self.maxs.z + 2):
-								pos = vec3(x, y, z)
-								obj_mat = obj_spr.get_voxel(None, obj.maxs - pos)
-								if obj_mat and obj_mat.solidity > random.random():
-									for i in range(len(offset)):
-										self_mat = self_spr.get_voxel(None, self.maxs - pos + offset[i])
-										if self_mat:
-											if self_mat.solidity > random.random():
-												offset_free[i] = False
-											friction += obj_mat.friction * self_mat.friction
-											elasticity += obj_mat.elasticity * self_mat.elasticity
+			frame_old = self_spr.frame
+			self_spr.anim_update()
+			frame_new = self_spr.frame
+			if frame_old != frame_new:
+				self.area_update()
 
-			# Modify object velocity based on weight and friction, apply velocity to the step counter and reset it when -1 or +1 is reached on an axis
-			# Note which directions are desired based on velocity in the same order as offsets, current position is always false
-			# If a position collides in the direction of velocity, reflect the velocity on that axis based on elasticity
-			self.vel -= vec3(0, weight, 0)
-			self.vel *= max(0, 1 - friction)
-			for i in range(1, len(offset)):
-				if not offset_free[i]:
-					if (self.vel.x < 0 and offset[i].x < 0) or (self.vel.x > 0 and offset[i].x > 0):
-						self.vel.x *= -min(1, elasticity)
-					if (self.vel.y < 0 and offset[i].y < 0) or (self.vel.y > 0 and offset[i].y > 0):
-						self.vel.y *= -min(1, elasticity)
-					if (self.vel.z < 0 and offset[i].z < 0) or (self.vel.z > 0 and offset[i].z > 0):
-						self.vel.z *= -min(1, elasticity)
-			self.vel_step += self.vel * time
-			offset_desired = [False, self.vel_step.x <= -1, self.vel_step.x >= +1, self.vel_step.y <= -1, self.vel_step.y >= +1, self.vel_step.z <= -1, self.vel_step.z >= +1]
-			self.vel_step -= math.trunc(self.vel_step)
+			if self.actor:
+				# List of offsets used to calculate neighboring object positions in order: Current position, -X, +X, -Y, +Y, -Z, +Z
+				offset = [vec3(0, 0, 0), vec3(-1, 0, 0), vec3(+1, 0, 0), vec3(0, -1, 0), vec3(0, +1, 0), vec3(0, 0, -1), vec3(0, 0, +1)]
+				offset_free = [True] * len(offset)
+				offset_desired = [False] * len(offset)
+				weight = friction = elasticity = 0
 
-			# Pick a random direction to move to from the list of valid directions that can be preformed this execution
-			# If the object is free move only to a desired position based on velocity, if the object is stuck any free position is allowed
-			positions = []
-			for i in range(1, len(offset)):
-				if offset_free[i] and (offset_desired[i] or not offset_free[0]):
-					positions.append(offset[i])
-			if len(positions):
-				self.move(self.pos + random.choice(positions))
+				# Check at which neighboring positions any voxel in this object overlaps that of other objects to determine which locations are free
+				# The check is also used to estimate friction and elasticity, by comparing the values of all voxels that would touch at any position
+				for pos, mat in self_spr.get_voxels(None):
+					weight += mat.weight
+				for obj in objects:
+					if obj != self and obj.sprites[0] and obj.intersects(self.mins - 1, self.maxs + 1):
+						obj_spr = obj.get_sprite()
+						for x in range(self.mins.x - 1, self.maxs.x + 2):
+							for y in range(self.mins.y - 1, self.maxs.y + 2):
+								for z in range(self.mins.z - 1, self.maxs.z + 2):
+									pos = vec3(x, y, z)
+									obj_mat = obj_spr.get_voxel(None, pos - obj.mins)
+									if obj_mat and obj_mat.solidity > random.random():
+										for i in range(len(offset)):
+											self_mat = self_spr.get_voxel(None, pos - self.mins - offset[i])
+											if self_mat:
+												if self_mat.solidity > random.random():
+													offset_free[i] = False
+												friction += obj_mat.friction * self_mat.friction
+												elasticity += obj_mat.elasticity * self_mat.elasticity
+
+				# Modify object velocity based on weight and friction, apply velocity to the step counter and reset it when -1 or +1 is reached on an axis
+				# Note which directions are desired based on velocity in the same order as offsets, current position is always false
+				# If a position collides in the direction of velocity, reflect the velocity on that axis based on elasticity
+				self.vel -= vec3(0, weight, 0)
+				self.vel *= max(0, 1 - friction)
+				for i in range(1, len(offset)):
+					if not offset_free[i]:
+						if (self.vel.x < 0 and offset[i].x < 0) or (self.vel.x > 0 and offset[i].x > 0):
+							self.vel.x *= -min(1, elasticity)
+						if (self.vel.y < 0 and offset[i].y < 0) or (self.vel.y > 0 and offset[i].y > 0):
+							self.vel.y *= -min(1, elasticity)
+						if (self.vel.z < 0 and offset[i].z < 0) or (self.vel.z > 0 and offset[i].z > 0):
+							self.vel.z *= -min(1, elasticity)
+				self.vel_step += self.vel * time
+				offset_desired = [False, self.vel_step.x <= -1, self.vel_step.x >= +1, self.vel_step.y <= -1, self.vel_step.y >= +1, self.vel_step.z <= -1, self.vel_step.z >= +1]
+				self.vel_step -= math.trunc(self.vel_step)
+
+				# Pick a random direction to move to from the list of valid directions that can be preformed this execution
+				# If the object is free move only to a desired position based on velocity, if the object is stuck any free position is allowed
+				positions = []
+				for i in range(1, len(offset)):
+					if offset_free[i] and (offset_desired[i] or not offset_free[0]):
+						positions.append(offset[i])
+				if len(positions):
+					self.move(self.pos + random.choice(positions))
 
 	# Set a sprite as the active sprite, None removes the sprite from this object and disables it
 	# If more than one sprite is provided, store up 4 sprites representing object angles
 	# Set the size and bounding box of the object to that of its sprite, or a point if the sprite is disabled
 	def set_sprite(self, *sprites):
+		self.area_update()
 		self.size = self.mins = self.maxs = vec3(0, 0, 0)
 		for i in range(len(sprites)):
 			self.sprites[i] = sprites[i]
@@ -297,10 +364,11 @@ class Object:
 			self.size = math.trunc(self.sprites[0].size / 2)
 			self.mins = math.trunc(self.pos) - self.size
 			self.maxs = math.trunc(self.pos) + self.size
+		self.area_update()
 
 	# Get the appropriate sprite for this object based on which 0* / 90* / 180* / 270* direction it's facing toward
 	def get_sprite(self):
-		angle = round(self.rot.y / 90) % 4
+		angle = round(self.rot.z / 90) % 4
 		if self.sprites[angle]:
 			return self.sprites[angle]
 		return self.sprites[0]
@@ -310,3 +378,10 @@ class Object:
 	def set_camera(self, pos: vec2):
 		for obj in objects:
 			obj.cam_pos = obj == self and pos or None
+
+	# Check whether this object has a sprite and is visible
+	def visible(self):
+		return self.sprites[0] and True or False
+
+# Execute the init script of the loaded mod
+importlib.import_module("mods." + mod + ".init")
