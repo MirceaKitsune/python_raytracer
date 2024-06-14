@@ -71,9 +71,9 @@ class Camera:
 				# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
 				if mat.ior:
 					direction = (mat.ior - 0.5) * 2
-					pos_x = ray.vel.x * direction < 0 and ray.pos + vec3(1, 0, 0) or ray.pos - vec3(1, 0, 0)
-					pos_y = ray.vel.y * direction < 0 and ray.pos + vec3(0, 1, 0) or ray.pos - vec3(0, 1, 0)
-					pos_z = ray.vel.z * direction < 0 and ray.pos + vec3(0, 0, 1) or ray.pos - vec3(0, 0, 1)
+					pos_x = ray.pos + vec3(1, 0, 0) if ray.vel.x * direction < 0 else ray.pos - vec3(1, 0, 0)
+					pos_y = ray.pos + vec3(0, 1, 0) if ray.vel.y * direction < 0 else ray.pos - vec3(0, 1, 0)
+					pos_z = ray.pos + vec3(0, 0, 1) if ray.vel.z * direction < 0 else ray.pos - vec3(0, 0, 1)
 					mat_x = self.chunk_get(pos_x)
 					mat_y = self.chunk_get(pos_y)
 					mat_z = self.chunk_get(pos_z)
@@ -125,31 +125,22 @@ class Camera:
 		self.pos = cam_pos
 		self.rot = cam_rot
 
-		# Remove existing chunks that are out of range
-		for post in list(self.chunks.keys()):
-			pos = vec3(post[0], post[1], post[2])
-			if math.dist(pos.array(), self.pos.array()) > data.settings.dist_max + round(data.settings.chunk_size / 2):
-				self.chunk_set(pos, [])
-
-		# Compile a new voxel list for chunks that need to be redrawn
+		# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
 		for pos_center in data.objects_chunks_update:
+			voxels = []
 			pos_min = pos_center - round(data.settings.chunk_size / 2)
 			pos_max = pos_center + round(data.settings.chunk_size / 2)
-			voxels = []
-
-			# For every object touching this chunk, add intersecting voxels within the camera view range
 			for obj in data.objects:
-				if obj.visible() and obj.intersects(pos_min, pos_max):
+				if obj.visible and obj.intersects(pos_min, pos_max):
 					spr = obj.get_sprite()
 					for x in range(pos_min.x, pos_max.x):
 						for y in range(pos_min.y, pos_max.y):
 							for z in range(pos_min.z, pos_max.z):
 								pos = vec3(x, y, z)
-								if obj.intersects(pos, pos) and math.dist(pos.array(), self.pos.array()) <= data.settings.dist_max:
+								if obj.intersects(pos, pos):
 									mat = spr.get_voxel(None, pos - obj.mins)
 									if mat:
 										voxels.append((pos - pos_min, mat))
-
 			self.chunk_set(pos_center, voxels)
 		data.objects_chunks_update = []
 
@@ -182,7 +173,7 @@ class Window:
 
 		# Main loop, limited by FPS with a slower clock when the window isn't focused
 		while self.running:
-			fps = pg.mouse.get_focused() and data.settings.fps or math.trunc(data.settings.fps / 5)
+			fps = data.settings.fps if pg.mouse.get_focused() else math.trunc(data.settings.fps / 5)
 			self.clock.tick(fps)
 			self.update()
 			if not self.running:
@@ -191,28 +182,20 @@ class Window:
 				exit
 
 	# Called by the thread pool on finish, adds the image to the appropriate sample and thread for the main thread to mix
-	def update_tile(self, result):
+	def draw_tile(self, result):
 		image, sample, thread = result
 		self.tiles[sample][thread] = image
 
-	# Render a new frame from the perspective of the main object, handle object physics and player control
-	def update(self):
-		obj_cam = None
-		for obj in data.objects:
-			if obj.cam_pos:
-				obj_cam = obj
-			obj.physics(self.clock.get_time())
+	# Request the camera to draw a new tile for each thread and sample
+	def draw(self):
+		# If sync is enabled, skip updates until all samples and tiles have finished
+		if data.settings.sync:
+			for sample in self.tiles:
+				for tile in sample:
+					if not tile:
+						return
 
-		pg.mouse.set_visible(not self.mouselook)
-		keys = pg.key.get_pressed()
-		mods = pg.key.get_mods()
-		d = obj_cam.rot.dir(False)
-		units = self.clock.get_time() / 1000 * data.settings.speed_move
-		units_jump = self.clock.get_time() / 1000 * data.settings.speed_jump
-		units_mouse = data.settings.speed_mouse / 1000
-		self.cam.update(obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z), obj_cam.rot)
-
-		# Render: Request the camera to draw a new tile for each thread and sample, gradually blend thread samples that have finished to the canvas
+		# Add available tiles to their corresponding sample, blit valid samples to the canvas with performance information on top
 		samples = []
 		for s in range(len(self.tiles)):
 			tiles = []
@@ -220,20 +203,28 @@ class Window:
 				if self.tiles[s][t]:
 					tile = pg.image.frombytes(self.tiles[s][t], (data.settings.width, self.lines), "RGB")
 					tiles.append((tile, (0, t * self.lines)))
-					self.pool.apply_async(self.cam.tile, args = (self.tiles[s][t], s, t,), callback = self.update_tile)
+					self.pool.apply_async(self.cam.tile, args = (self.tiles[s][t], s, t,), callback = self.draw_tile)
 					self.tiles[s][t] = None
-			sample = pg.Surface.copy(self.canvas)
-			sample.blits(tiles)
-			samples.append(sample)
-		self.canvas = pg.transform.average_surfaces(samples)
+			if tiles:
+				sample = pg.Surface.copy(self.canvas)
+				sample.blits(tiles)
+				samples.append(sample)
+		if samples:
+			self.canvas = pg.transform.average_surfaces(samples)
+			canvas = pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) if data.settings.smooth else pg.transform.scale(self.canvas, self.rect_win.tuple())
+			text_info = str(data.settings.width) + " x " + str(data.settings.height) + " (" + str(data.settings.width * data.settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(data.settings.fps) + " FPS"
+			text = self.font.render(text_info, True, (255, 255, 255))
+			self.screen.blit(canvas, (0, 0))
+			self.screen.blit(text, (0, 0))
 
-		# Render: Blit the total number of tiles that are waiting to the canvas, update and blit the info text on top
-		canvas = data.settings.smooth and pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) or pg.transform.scale(self.canvas, self.rect_win.tuple())
-		text_info = str(data.settings.width) + " x " + str(data.settings.height) + " (" + str(data.settings.width * data.settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(data.settings.fps) + " FPS"
-		text = self.font.render(text_info, True, (255, 255, 255))
-		self.screen.blit(canvas, (0, 0))
-		self.screen.blit(text, (0, 0))
-		pg.display.update()
+	# Handle keyboard and mouse input, apply object movement for the camera controlled object
+	def input(self, obj_cam: data.Object):
+		keys = pg.key.get_pressed()
+		mods = pg.key.get_mods()
+		units = self.clock.get_time() / 1000 * data.settings.speed_move
+		units_jump = self.clock.get_time() / 1000 * data.settings.speed_jump
+		units_mouse = data.settings.speed_mouse / 1000
+		d = obj_cam.rot.dir(False)
 
 		# Input, mods: Acceleration
 		if mods & pg.KMOD_SHIFT:
@@ -247,6 +238,7 @@ class Window:
 			if e.type == pg.KEYDOWN:
 				if e.key == pg.K_ESCAPE:
 					self.running = False
+					return
 				if e.key == pg.K_TAB:
 					self.mouselook = not self.mouselook
 			if e.type == pg.MOUSEWHEEL:
@@ -281,6 +273,27 @@ class Window:
 			obj_cam.rotate(vec3(0, 0, -5) * units, data.settings.max_pitch)
 		if keys[pg.K_RIGHT]:
 			obj_cam.rotate(vec3(0, 0, +5) * units, data.settings.max_pitch)
+
+	# Main loop of the Pygame window, trigger draw calls apply input and execute the update function of objects in the scene
+	def update(self):
+		obj_cam = None
+		for obj_cam in data.objects:
+			if obj_cam.cam_pos:
+				break
+		if not obj_cam or not obj_cam.cam_pos:
+			print("Error: No camera object found, define at least one object with a camera in the scene.")
+			self.running = False
+			return
+
+		for obj in data.objects:
+			obj.update(self.cam.pos, self.clock.get_time())
+
+		d = obj_cam.rot.dir(False)
+		self.cam.update(obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z), obj_cam.rot)
+		self.input(obj_cam)
+		self.draw()
+		pg.display.update()
+		pg.mouse.set_visible(not self.mouselook)
 
 # Create the main window and start Pygame
 Window()

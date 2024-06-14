@@ -254,9 +254,9 @@ class vec3:
 	def dir(self, normalize: bool):
 		rad_y = math.radians(self.y)
 		rad_z = math.radians(self.z)
-		dir_x = math.sin(rad_z) * (normalize and math.cos(rad_y) or 1)
+		dir_x = math.sin(rad_z) * math.cos(rad_y) if normalize else math.sin(rad_z)
 		dir_y = math.sin(rad_y)
-		dir_z = math.cos(rad_z) * (normalize and math.cos(rad_y) or 1)
+		dir_z = math.cos(rad_z) * math.cos(rad_y) if normalize else math.cos(rad_z)
 		return vec3(dir_x, dir_y, dir_z)
 
 	def normalize(self):
