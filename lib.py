@@ -287,6 +287,12 @@ class rgb:
 	def tuple(self):
 		return (self.r, self.g, self.b)
 
+	def raw(self):
+		return rgb(self.r / 255, self.g / 255, self.b / 255)
+
+	def raw_total(self):
+		return (self.r + self.g + self.b) / 765
+
 	def mix(self, col, bias1):
 		bias2 = 1 - bias1
 		return rgb(round(self.r * bias2 + col.r * bias1), round(self.g * bias2 + col.g * bias1), round(self.b * bias2 + col.b * bias1))

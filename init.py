@@ -88,8 +88,10 @@ class Camera:
 				mat.function(ray, mat, data.settings)
 				ray.vel = ray.vel.normalize()
 
-			# Terminate this ray earlier in some circumstances to improve performance
-			if ray.hits and data.settings.terminate_hits / ray.hits < random.random():
+			# Terminate the ray earlier to improve performance, hit based checks only need to be calculated if a material was hit
+			if mat and ray.hits and ray.color.raw_total() * ray.hits * data.settings.terminate_light >= 1:
+				break
+			elif mat and ray.hits and data.settings.terminate_hits / ray.hits < random.random():
 				break
 			elif ray.step / ray.life > 1 - data.settings.terminate_dist * random.random():
 				break
@@ -103,11 +105,13 @@ class Camera:
 
 	# Called by threads with a tile image to paint to, creates a new surface for this thread to paint to which is returned to the main thread as a byte string
 	# If static noise is enabled, the random seed is set to an index unique to this pixel and sample so noise in ray calculations is static instead of flickering
-	def tile(self, image: str, sample: int, thread: int):
+	# The batch number decides which group of pixels should be rendered this call using a pattern generated from the 2D position of the pixel
+	def tile(self, image: str, sample: int, thread: int, batch: int):
 		tile = pg.image.frombytes(image, (data.settings.width, self.lines), "RGB")
+
 		for x in range(data.settings.width):
 			for y in range(self.lines):
-				if data.settings.skip < random.random():
+				if (x ^ y) % data.settings.batches == batch:
 					line_y = y + (self.lines * thread)
 					dir_x = (-0.5 + x / data.settings.width) * 2
 					dir_y = (-0.5 + line_y / data.settings.height) * 2
@@ -162,14 +166,17 @@ class Window:
 		self.mouselook = True
 		self.running = True
 
-		# Prepare the list of samples, each sample stores an image slot for every thread which is cleared after being drawn
+		# Prepare the containers for samples and batches, each sample stores an image slot for every thread which is cleared after being drawn
 		self.tiles = []
+		self.batches = []
 		for s in range(data.settings.samples):
 			self.tiles.append([])
+			self.batches.append([])
 			for t in range(data.settings.threads):
 				surface = pg.Surface((data.settings.width, self.lines), pg.HWSURFACE)
 				image = pg.image.tobytes(surface, "RGB")
 				self.tiles[s].append(image)
+				self.batches[s].append(0)
 
 		# Main loop, limited by FPS with a slower clock when the window isn't focused
 		while self.running:
@@ -185,6 +192,7 @@ class Window:
 	def draw_tile(self, result):
 		image, sample, thread = result
 		self.tiles[sample][thread] = image
+		self.batches[sample][thread] = (self.batches[sample][thread] + 1) % data.settings.batches
 
 	# Request the camera to draw a new tile for each thread and sample
 	def draw(self):
@@ -203,7 +211,7 @@ class Window:
 				if self.tiles[s][t]:
 					tile = pg.image.frombytes(self.tiles[s][t], (data.settings.width, self.lines), "RGB")
 					tiles.append((tile, (0, t * self.lines)))
-					self.pool.apply_async(self.cam.tile, args = (self.tiles[s][t], s, t,), callback = self.draw_tile)
+					self.pool.apply_async(self.cam.tile, args = (self.tiles[s][t], s, t, self.batches[s][t]), callback = self.draw_tile)
 					self.tiles[s][t] = None
 			if tiles:
 				sample = pg.Surface.copy(self.canvas)
@@ -226,11 +234,11 @@ class Window:
 		units_mouse = data.settings.speed_mouse / 1000
 		d = obj_cam.rot.dir(False)
 
-		# Input, mods: Acceleration
+		# Mods: Acceleration
 		if mods & pg.KMOD_SHIFT:
 			units *= 5
 
-		# Input, one time events: Quit, request quit or toggle mouselook, mouse wheel movement, mouse motion
+		# One time events: Quit, request quit or toggle mouselook, mouse wheel movement, mouse motion
 		for e in pg.event.get():
 			if e.type == pg.QUIT:
 				self.running = False
@@ -252,7 +260,7 @@ class Window:
 				obj_cam.rotate(rot * units_mouse, data.settings.max_pitch)
 				pg.mouse.set_pos((center.x, center.y))
 
-		# Input, ongoing events: Camera movement, camera rotation
+		# Ongoing events: Camera movement, camera rotation
 		if keys[pg.K_w]:
 			obj_cam.impulse(vec3(+d.x, +d.y, +d.z) * units)
 		if keys[pg.K_s]:
