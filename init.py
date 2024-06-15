@@ -33,8 +33,7 @@ class Camera:
 		post = pos.tuple()
 		if voxels:
 			self.chunks[post] = data.Frame()
-			for pos, mat in voxels:
-				self.chunks[post].set_voxel(pos, mat)
+			self.chunks[post].set_voxels(voxels)
 		elif post in self.chunks:
 			del self.chunks[post]
 

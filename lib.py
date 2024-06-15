@@ -107,11 +107,23 @@ class vec2:
 	def array(self):
 		return [self.x, self.y]
 
-	def min(self):
+	def mins(self):
 		return min(self.x, self.y)
 
-	def max(self):
+	def maxs(self):
 		return max(self.x, self.y)
+
+	def min(self, other):
+		if isinstance(other, vec2):
+			return vec2(min(self.x, other.x), min(self.y, other.y))
+		else:
+			return vec2(min(self.x, other), min(self.y, other))
+
+	def max(self, other):
+		if isinstance(other, vec2):
+			return vec2(max(self.x, other.x), max(self.y, other.y))
+		else:
+			return vec2(max(self.x, other), max(self.y, other))
 
 	def tuple(self):
 		return (self.x, self.y)
@@ -232,11 +244,23 @@ class vec3:
 	def array(self):
 		return [self.x, self.y, self.z]
 
-	def min(self):
+	def mins(self):
 		return min(self.x, self.y, self.z)
 
-	def max(self):
+	def maxs(self):
 		return max(self.x, self.y, self.z)
+
+	def min(self, other):
+		if isinstance(other, vec3):
+			return vec3(min(self.x, other.x), min(self.y, other.y), min(self.z, other.z))
+		else:
+			return vec3(min(self.x, other), min(self.y, other), min(self.z, other))
+
+	def max(self, other):
+		if isinstance(other, vec3):
+			return vec3(max(self.x, other.x), max(self.y, other.y), max(self.z, other.z))
+		else:
+			return vec3(max(self.x, other), max(self.y, other), max(self.z, other))
 
 	def tuple(self):
 		return (self.x, self.y, self.z)
