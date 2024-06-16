@@ -12,7 +12,7 @@ mat_opaque_red = data.Material(
 	energy = 0,
 	solidity = 1,
 	weight = 0,
-	friction = 0.125,
+	friction = 0.5,
 	elasticity = 0,
 )
 
@@ -25,7 +25,7 @@ mat_opaque_green = data.Material(
 	energy = 0,
 	solidity = 1,
 	weight = 0,
-	friction = 0.125,
+	friction = 0.5,
 	elasticity = 0,
 )
 
@@ -38,7 +38,7 @@ mat_opaque_blue = data.Material(
 	energy = 0,
 	solidity = 1,
 	weight = 0,
-	friction = 0.125,
+	friction = 0.5,
 	elasticity = 0,
 )
 
@@ -50,9 +50,9 @@ mat_rough_white = data.Material(
 	ior = 1,
 	energy = 0,
 	solidity = 1,
-	weight = 0.0125,
-	friction = 0.25,
-	elasticity = 1,
+	weight = 0.005,
+	friction = 0.5,
+	elasticity = 0.5,
 )
 
 mat_translucent = data.Material(
@@ -77,8 +77,8 @@ mat_light = data.Material(
 	energy = 2.5,
 	solidity = 1,
 	weight = 0,
-	friction = 0.125,
-	elasticity = 0.25,
+	friction = 0.25,
+	elasticity = 0.5,
 )
 
 spr = data.Sprite(size = vec3(64, 64, 64), frames = 1)

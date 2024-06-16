@@ -29,10 +29,10 @@ class Camera:
 		return None
 
 	# Create a new frame with this voxel list or delete the chunk if empty
-	def chunk_set(self, pos: vec3, voxels: list):
+	def chunk_set(self, pos: vec3, voxels: dict):
 		post = pos.tuple()
 		if voxels:
-			self.chunks[post] = data.Frame()
+			self.chunks[post] = data.Frame(packed = True)
 			self.chunks[post].set_voxels(voxels)
 		elif post in self.chunks:
 			del self.chunks[post]
@@ -130,7 +130,7 @@ class Camera:
 
 		# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
 		for pos_center in data.objects_chunks_update:
-			voxels = []
+			voxels = {}
 			pos_min = pos_center - round(data.settings.chunk_size / 2)
 			pos_max = pos_center + round(data.settings.chunk_size / 2)
 			for obj in data.objects:
@@ -143,7 +143,9 @@ class Camera:
 								if obj.intersects(pos, pos):
 									mat = spr.get_voxel(None, pos - obj.mins)
 									if mat:
-										voxels.append((pos - pos_min, mat))
+										pos_chunk = pos - pos_min
+										post_chunk = pos_chunk.tuple()
+										voxels[post_chunk] = mat
 			self.chunk_set(pos_center, voxels)
 		data.objects_chunks_update = []
 
@@ -228,9 +230,10 @@ class Window:
 	def input(self, obj_cam: data.Object):
 		keys = pg.key.get_pressed()
 		mods = pg.key.get_mods()
-		units = self.clock.get_time() / 1000 * data.settings.speed_move
-		units_jump = self.clock.get_time() / 1000 * data.settings.speed_jump
-		units_mouse = data.settings.speed_mouse / 1000
+		time = self.clock.get_time() / 1000
+		units = time * data.settings.speed_move
+		units_jump = time * data.settings.speed_jump
+		units_mouse = time * data.settings.speed_mouse
 		d = obj_cam.rot.dir(False)
 
 		# Mods: Acceleration
@@ -293,7 +296,7 @@ class Window:
 			return
 
 		for obj in data.objects:
-			obj.update(self.cam.pos, self.clock.get_time())
+			obj.update(self.cam.pos)
 
 		d = obj_cam.rot.dir(False)
 		self.cam.update(obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z), obj_cam.rot)
