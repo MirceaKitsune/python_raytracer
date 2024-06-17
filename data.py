@@ -40,7 +40,8 @@ settings = store(
 	friction_air = cfg.getfloat("PHYSICS", "friction_air") or 0,
 	speed_jump = cfg.getfloat("PHYSICS", "speed_jump") or 1,
 	speed_move = cfg.getfloat("PHYSICS", "speed_move") or 1,
-	speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 10,
+	speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 1,
+	max_vel = cfg.getfloat("PHYSICS", "max_vel") or 0,
 	max_pitch = cfg.getfloat("PHYSICS", "max_pitch") or 0,
 )
 
@@ -325,7 +326,7 @@ class Sprite:
 class Object:
 	def __init__(self, **settings):
 		# pos is the center of the object in world space, size is half of the active sprite size and represents distance from the origin to each bounding box surface
-		# mins and maxs represent the start and end corners in world space, updated when moving the object to avoid costly checks during ray tracing
+		# mins and maxs represent the integer start and end corners in world space, updated when moving the object to avoid costly checks during ray tracing
 		# When a sprite is set the object is resized to its position and voxels will be fetched from it, setting the sprite to None disables this object
 		# The object holds 4 sprites for every direction angle (0* 90* 180* 270*), the set_sprite function can also take a single sprite to disable rotation
 		self.pos = settings["pos"] if "pos" in settings else vec3(0, 0, 0)
@@ -334,7 +335,6 @@ class Object:
 		self.physics = settings["physics"] if "physics" in settings else False
 
 		self.visible = False
-		self.vel_step = vec3(0, 0, 0)
 		self.size = self.mins = self.maxs = vec3(0, 0, 0)
 		self.sprites = [None] * 4
 		self.cam_pos = None
@@ -390,9 +390,9 @@ class Object:
 	def move(self, pos):
 		if pos != self.pos:
 			self.area_update()
-			self.pos = math.trunc(pos)
-			self.mins = self.pos - self.size
-			self.maxs = self.pos + self.size
+			self.pos = pos
+			self.mins = math.trunc(self.pos) - self.size
+			self.maxs = math.trunc(self.pos) + self.size
 			self.area_update()
 
 	# Add velocity to this object, 1 is the maximum speed allowed for objects
@@ -401,45 +401,58 @@ class Object:
 
 	# Physics engine, applies velocity accounting for collisions with other objects and moves this object to the nearest empty space if one is available
 	def update_physics(self):
-		# Scan other objects for common voxels in intersecting areas, slices are checked in directions -X, +X, -Y, +Y, -Z, +Z
-		# If a direction collides with any solid voxels, it's removed from the list to mark it as invalid for the movement code
-		# In addition the check is used apply friction and elasticity from all neighboring voxels this object is touching
 		self_spr = self.get_sprite()
-		pos_dirs = [vec3(-1, 0, 0), vec3(+1, 0, 0), vec3(0, -1, 0), vec3(0, +1, 0), vec3(0, 0, -1), vec3(0, 0, +1)]
-		for pos_dir in list(pos_dirs):
-			pos_slice_min = self.mins + pos_dir + 0 if pos_dir.x < 0 or pos_dir.y < 0 or pos_dir.z < 0 else self.maxs - 1
-			pos_slice_max = self.maxs + pos_dir - 1 if pos_dir.x > 0 or pos_dir.y > 0 or pos_dir.z > 0 else self.mins + 0
-			for obj in objects:
-				if obj != self and obj.visible and obj.intersects(pos_slice_min, pos_slice_max):
-					obj_spr = obj.get_sprite()
-					for x in range(pos_slice_min.x, pos_slice_max.x + 1):
-						for y in range(pos_slice_min.y, pos_slice_max.y + 1):
-							for z in range(pos_slice_min.z, pos_slice_max.z + 1):
-								pos = vec3(x, y, z)
-								obj_mat = obj_spr.get_voxel(None, pos - obj.mins)
-								if obj_mat and obj_mat.solidity > random.random():
-									self_mat = self_spr.get_voxel(None, pos - self.mins - pos_dir)
-									if self_mat and self_mat.solidity > random.random():
-										if pos_dir in pos_dirs:
-											pos_dirs.remove(pos_dir)
-										self.vel -= abs(self.vel) * pos_dir * (1 + obj_mat.elasticity * self_mat.elasticity * settings.friction)
-										self.vel /= (1 + obj_mat.friction * self_mat.friction * settings.friction)
+		steps = self.vel
+		while(steps != 0):
+			pos_dirs = {
+				(-1, 0, 0): (self.mins.x - 1, self.mins.y + 0, self.mins.z + 0, self.mins.x + 0, self.maxs.y + 0, self.maxs.z + 0),
+				(+1, 0, 0): (self.maxs.x + 0, self.mins.y + 0, self.mins.z + 0, self.maxs.x + 1, self.maxs.y + 0, self.maxs.z + 0),
+				(0, -1, 0): (self.mins.x + 0, self.mins.y - 1, self.mins.z + 0, self.maxs.x + 0, self.mins.y + 0, self.maxs.z + 0),
+				(0, +1, 0): (self.mins.x + 0, self.maxs.y + 0, self.mins.z + 0, self.maxs.x + 0, self.maxs.y + 1, self.maxs.z + 0),
+				(0, 0, -1): (self.mins.x + 0, self.mins.y + 0, self.mins.z - 1, self.maxs.x + 0, self.maxs.y + 0, self.mins.z + 0),
+				(0, 0, +1): (self.mins.x + 0, self.mins.y + 0, self.maxs.z + 0, self.maxs.x + 0, self.maxs.y + 0, self.maxs.z + 1),
+			}
 
-		# Apply global effects to velocity and increase the velocity step, velocity must be limited to a -1 to +1 range
-		self.vel *= (1 - settings.friction_air)
+			# Scan other objects for common voxels in intersecting areas
+			# Directions and their corresponding slice boxes are checked in order -X, +X, -Y, +Y, -Z, +Z
+			# If a direction collides with any solid voxels, it's removed from the list to mark it as invalid for movement
+			# The check is also used to apply friction and elasticity from all neighboring voxels this object is touching
+			for post_dir, post6 in dict(pos_dirs).items():
+				pos_dir = vec3(post_dir[0], post_dir[1], post_dir[2])
+				pos_slice_min = self.mins + pos_dir + 0 if pos_dir.x < 0 or pos_dir.y < 0 or pos_dir.z < 0 else self.maxs - 1
+				pos_slice_max = self.maxs + pos_dir - 1 if pos_dir.x > 0 or pos_dir.y > 0 or pos_dir.z > 0 else self.mins + 0
+				for obj in objects:
+					if obj != self and obj.visible and obj.intersects(pos_slice_min, pos_slice_max):
+						obj_spr = obj.get_sprite()
+						for x in range(post6[0], post6[3] + 1):
+							for y in range(post6[1], post6[4] + 1):
+								for z in range(post6[2], post6[5] + 1):
+									pos = vec3(x, y, z)
+									obj_mat = obj_spr.get_voxel(None, pos - obj.mins)
+									if obj_mat and obj_mat.solidity > random.random():
+										self_mat = self_spr.get_voxel(None, pos - self.mins - pos_dir)
+										if self_mat and self_mat.solidity > random.random():
+											if post_dir in pos_dirs:
+												del pos_dirs[post_dir]
+											self.vel -= pos_dir * (obj_mat.elasticity * self_mat.elasticity * settings.friction)
+											self.vel /= 1 + (obj_mat.friction * self_mat.friction * settings.friction)
+
+			# Preform a move in at most one unit, extract the amount of movement for this call from the total number of steps
+			# If velocity is greater than 1 the main loop will continue until the total velocity has been applied
+			# Note: Diagonal movement may intersect corners as direction checks only account for one axis
+			step = steps.min(+1).max(-1)
+			for post_dir, post6 in pos_dirs.items():
+				pos_dir = vec3(post_dir[0], post_dir[1], post_dir[2])
+				pos_step = step * abs(pos_dir)
+				if step.x * pos_dir.x > 0 or step.y * pos_dir.y > 0 or step.z * pos_dir.z > 0:
+					self.move(self.pos + pos_step)
+			steps -= step
+
+		# Apply global effects to velocity then bound it to the terminal velocity
 		for post, mat in self_spr.get_voxels(None).items():
 			self.vel -= vec3(0, mat.weight * settings.gravity, 0)
-		if abs(self.vel.x) >= 1 or abs(self.vel.y) >= 1 or abs(self.vel.z) >= 1:
-			self.vel = self.vel.normalize()
-		self.vel_step += self.vel
-
-		# If the velocity step reached the -1 or +1 threshold the object can be moved, the step is reset back by 1 each time it ticks
-		# Movement can only be done in one axis and at one unit per execution, the step vector is normalized to extract the highest direction
-		if abs(self.vel_step.x) >= 1 or abs(self.vel_step.y) >= 1 or abs(self.vel_step.z) >= 1:
-			step_dir = math.trunc(self.vel_step.normalize())
-			if step_dir in pos_dirs:
-				self.move(self.pos + step_dir)
-			self.vel_step -= step_dir
+		self.vel *= (1 - settings.friction_air)
+		self.vel = self.vel.min(+settings.max_vel).max(-settings.max_vel)
 
 	# Update this object, called by the window every frame
 	# An immediate renderer update is issued when the object changes visibility or the sprite animation advances

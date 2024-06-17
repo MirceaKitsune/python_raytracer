@@ -235,6 +235,8 @@ class Window:
 		units_jump = time * data.settings.speed_jump
 		units_mouse = time * data.settings.speed_mouse
 		d = obj_cam.rot.dir(False)
+		dh = vec3(1, 0, 1) if data.settings.max_pitch else vec3(1, 1, 1)
+		dv = vec3(0, 1, 0) if data.settings.max_pitch else vec3(1, 1, 1)
 
 		# Mods: Acceleration
 		if mods & pg.KMOD_SHIFT:
@@ -264,17 +266,17 @@ class Window:
 
 		# Ongoing events: Camera movement, camera rotation
 		if keys[pg.K_w]:
-			obj_cam.impulse(vec3(+d.x, +d.y, +d.z) * units)
+			obj_cam.impulse(vec3(+d.x, +d.y, +d.z) * dh * units)
 		if keys[pg.K_s]:
-			obj_cam.impulse(vec3(-d.x, -d.y, -d.z) * units)
+			obj_cam.impulse(vec3(-d.x, -d.y, -d.z) * dh * units)
 		if keys[pg.K_a]:
-			obj_cam.impulse(vec3(-d.z, 0, +d.x) * units)
+			obj_cam.impulse(vec3(-d.z, 0, +d.x) * dh * units)
 		if keys[pg.K_d]:
-			obj_cam.impulse(vec3(+d.z, 0, -d.x) * units)
+			obj_cam.impulse(vec3(+d.z, 0, -d.x) * dh * units)
 		if keys[pg.K_r] or keys[pg.K_SPACE]:
-			obj_cam.impulse(vec3(0, +1, 0) * units_jump)
+			obj_cam.impulse(vec3(0, +1, 0) * dv * units_jump)
 		if keys[pg.K_f] or keys[pg.K_LCTRL]:
-			obj_cam.impulse(vec3(0, -1, 0) * units_jump)
+			obj_cam.impulse(vec3(0, -1, 0) * dv * units_jump)
 		if keys[pg.K_UP]:
 			obj_cam.rotate(vec3(0, +5, 0) * units, data.settings.max_pitch)
 		if keys[pg.K_DOWN]:

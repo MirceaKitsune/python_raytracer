@@ -12,7 +12,7 @@ mat_opaque_red = data.Material(
 	energy = 0,
 	solidity = 1,
 	weight = 0,
-	friction = 0.5,
+	friction = 0.25,
 	elasticity = 0,
 )
 
@@ -25,7 +25,7 @@ mat_opaque_green = data.Material(
 	energy = 0,
 	solidity = 1,
 	weight = 0,
-	friction = 0.5,
+	friction = 0.25,
 	elasticity = 0,
 )
 
@@ -38,7 +38,7 @@ mat_opaque_blue = data.Material(
 	energy = 0,
 	solidity = 1,
 	weight = 0,
-	friction = 0.5,
+	friction = 0.25,
 	elasticity = 0,
 )
 
@@ -50,8 +50,8 @@ mat_rough_white = data.Material(
 	ior = 1,
 	energy = 0,
 	solidity = 1,
-	weight = 0.005,
-	friction = 0.5,
+	weight = 0.0125,
+	friction = 0.25,
 	elasticity = 0.5,
 )
 

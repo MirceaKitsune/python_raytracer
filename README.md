@@ -33,7 +33,8 @@ Settings are stored within the mod's `config.cfg` file and can be used to modify
     - `speed_jump`: Jump speed of the player, determines how fast the player moves vertically.
     - `speed_move`: Keyboard movement speed of the player, determines how fast the camera moves when using the movement keys.
     - `speed_mouse`: Mouse rotation speed of the player, determines how fast the camera rotates when moving the mouse in mouselook mode.
-    - `max_pitch`: Maximum pitch angle in degrees, the camera can't look lower or higher than this amount. 0 disables, use a value below 180, 90 is recommended.
+    - `max_vel`: Terminal velocity of objects, represents maximum allowed velocity and how many units per tick objects can move. Limits excessive speeds as well as performance impact.
+    - `max_pitch`: Maximum pitch angle in degrees, the camera can't look lower or higher than this amount. 0 disables, use a value below 180, 90 is recommended. When set horizontal movement keys won't affect vertical movement and vice versa.
   - `WINDOW`: Window related settings such as resolution and frame rate.
     - `width`: Number of horizontal pixels, higher values allow more detail but greatly affect performance.
     - `height`: Number of vertical pixels.
