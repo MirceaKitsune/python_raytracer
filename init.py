@@ -45,8 +45,8 @@ class Camera:
 		lens_x = (dir_x / self.proportions) * self.lens + rand(data.settings.dof)
 		lens_y = (dir_y * self.proportions) * self.lens + rand(data.settings.dof)
 		ray_rot = self.rot.rotate(vec3(0, -lens_y, +lens_x))
-		ray_dir = ray_rot.dir(True)
-		ray_dir = ray_dir.normalize()
+		ray_dir = ray_rot.dir(True).normalize()
+		ray_detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
 
 		# Ray data is kept in a data store so it can be easily delivered to material functions and support custom properties
 		ray = store(
@@ -55,16 +55,29 @@ class Camera:
 			pos = self.pos + ray_dir * data.settings.dist_min,
 			vel = ray_dir,
 			step = 0,
-			life = data.settings.dist_max - data.settings.dist_min,
-			hits = 0,
+			life = (data.settings.dist_max - data.settings.dist_min) * ray_detail,
+			bounces = 0,
 		)
 
 		# Each step the ray advances through space by adding its velocity to its position, starting from the minimum distance and going up to the maximum distance
 		# If a material is found, its function is called which can modify any of the ray properties provided
 		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
-		while ray.step < ray.life:				
+		while ray.step < ray.life:
 			mat = self.chunk_get(ray.pos)
 			if mat:
+				# Call the material function and obtain the bounce amount, add it to the total number of bounces
+				# Normalize ray velocity after any changes to ensure the speed of light remains 1 and voxels aren't skipped or calculated twice
+				bounce = mat.function(ray, mat, data.settings)
+				ray.life /= 1 + bounce * data.settings.lod_bounces
+				ray.bounces += bounce
+				ray.vel = ray.vel.normalize()
+
+				# Enforce maximum ray properties and terminate the trace earlier to improve performance
+				if ray.bounces >= data.settings.max_bounces + 1:
+					break
+				elif ray.energy >= data.settings.max_light:
+					break
+
 				# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
 				# A material considers its neighbors solid if they have the same IOR, otherwise they won't affect the direction of ray reflections
 				# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
@@ -83,17 +96,7 @@ class Camera:
 					if not (mat_z and mat_z.ior == mat.ior):
 						ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
 
-				# Call the material function, normalize ray velocity after making changes to ensure the speed of light remains 1 and future voxels aren't skipped or calculated twice
-				mat.function(ray, mat, data.settings)
-				ray.vel = ray.vel.normalize()
-
-			# Terminate the ray earlier to improve performance, hit based checks only need to be calculated if a material was hit
-			if mat and ray.hits and ray.color.raw_total() * ray.hits * data.settings.terminate_light >= 1:
-				break
-			elif mat and ray.hits and data.settings.terminate_hits / ray.hits < random.random():
-				break
-			elif ray.step / ray.life > 1 - data.settings.terminate_dist * random.random():
-				break
+			# Advance the ray by one unit each move
 			ray.step += 1
 			ray.pos += ray.vel
 
@@ -112,8 +115,8 @@ class Camera:
 			for y in range(self.lines):
 				if (x ^ y) % data.settings.batches == batch:
 					line_y = y + (self.lines * thread)
-					dir_x = (-0.5 + x / data.settings.width) * 2
-					dir_y = (-0.5 + line_y / data.settings.height) * 2
+					dir_x = -1 + (x / data.settings.width) * 2
+					dir_y = -1 + (line_y / data.settings.height) * 2
 
 					if data.settings.static:
 						random.seed((1 + x) * (1 + line_y) * (1 + sample))

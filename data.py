@@ -30,9 +30,10 @@ settings = store(
 	batches = cfg.getint("RENDER", "batches") or 1,
 	dist_min = cfg.getint("RENDER", "dist_min") or 0,
 	dist_max = cfg.getint("RENDER", "dist_max") or 48,
-	terminate_light = cfg.getfloat("RENDER", "terminate_light") or 0,
-	terminate_hits = cfg.getfloat("RENDER", "terminate_hits") or 0,
-	terminate_dist = cfg.getfloat("RENDER", "terminate_dist") or 0,
+	max_light = cfg.getint("RENDER", "max_light") or 0,
+	max_bounces = cfg.getint("RENDER", "max_bounces") or 0,
+	lod_bounces = cfg.getfloat("RENDER", "lod_bounces") or 0,
+	lod_edge = cfg.getfloat("RENDER", "lod_edge") or 0,
 	threads = cfg.getint("RENDER", "threads") or mp.cpu_count(),
 
 	gravity = cfg.getfloat("PHYSICS", "gravity") or 0,
@@ -41,7 +42,7 @@ settings = store(
 	speed_jump = cfg.getfloat("PHYSICS", "speed_jump") or 1,
 	speed_move = cfg.getfloat("PHYSICS", "speed_move") or 1,
 	speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 1,
-	max_vel = cfg.getfloat("PHYSICS", "max_vel") or 0,
+	max_velocity = cfg.getfloat("PHYSICS", "max_velocity") or 0,
 	max_pitch = cfg.getfloat("PHYSICS", "max_pitch") or 0,
 )
 
@@ -402,8 +403,8 @@ class Object:
 	# Physics engine, applies velocity accounting for collisions with other objects and moves this object to the nearest empty space if one is available
 	def update_physics(self):
 		self_spr = self.get_sprite()
-		steps = self.vel
-		while(steps != 0):
+		vel_steps = self.vel
+		while(vel_steps != 0):
 			pos_dirs = {
 				(-1, 0, 0): (self.mins.x - 1, self.mins.y + 0, self.mins.z + 0, self.mins.x + 0, self.maxs.y + 0, self.maxs.z + 0),
 				(+1, 0, 0): (self.maxs.x + 0, self.mins.y + 0, self.mins.z + 0, self.maxs.x + 1, self.maxs.y + 0, self.maxs.z + 0),
@@ -419,10 +420,8 @@ class Object:
 			# The check is also used to apply friction and elasticity from all neighboring voxels this object is touching
 			for post_dir, post6 in dict(pos_dirs).items():
 				pos_dir = vec3(post_dir[0], post_dir[1], post_dir[2])
-				pos_slice_min = self.mins + pos_dir + 0 if pos_dir.x < 0 or pos_dir.y < 0 or pos_dir.z < 0 else self.maxs - 1
-				pos_slice_max = self.maxs + pos_dir - 1 if pos_dir.x > 0 or pos_dir.y > 0 or pos_dir.z > 0 else self.mins + 0
 				for obj in objects:
-					if obj != self and obj.visible and obj.intersects(pos_slice_min, pos_slice_max):
+					if obj != self and obj.visible and obj.intersects(vec3(post6[0], post6[1], post6[2]), vec3(post6[3], post6[4], post6[5])):
 						obj_spr = obj.get_sprite()
 						for x in range(post6[0], post6[3] + 1):
 							for y in range(post6[1], post6[4] + 1):
@@ -434,25 +433,26 @@ class Object:
 										if self_mat and self_mat.solidity > random.random():
 											if post_dir in pos_dirs:
 												del pos_dirs[post_dir]
-											self.vel -= pos_dir * (obj_mat.elasticity * self_mat.elasticity * settings.friction)
+												self.vel *= vec3(1, 1, 1) - abs(pos_dir)
+											self.vel -= pos_dir * abs(vel_steps) * (obj_mat.elasticity * self_mat.elasticity * settings.friction)
 											self.vel /= 1 + (obj_mat.friction * self_mat.friction * settings.friction)
 
 			# Preform a move in at most one unit, extract the amount of movement for this call from the total number of steps
 			# If velocity is greater than 1 the main loop will continue until the total velocity has been applied
 			# Note: Diagonal movement may intersect corners as direction checks only account for one axis
-			step = steps.min(+1).max(-1)
+			vel_step = vel_steps.min(+1).max(-1)
 			for post_dir, post6 in pos_dirs.items():
 				pos_dir = vec3(post_dir[0], post_dir[1], post_dir[2])
-				pos_step = step * abs(pos_dir)
-				if step.x * pos_dir.x > 0 or step.y * pos_dir.y > 0 or step.z * pos_dir.z > 0:
+				pos_step = vel_step * abs(pos_dir)
+				if vel_step.x * pos_dir.x > 0 or vel_step.y * pos_dir.y > 0 or vel_step.z * pos_dir.z > 0:
 					self.move(self.pos + pos_step)
-			steps -= step
+			vel_steps -= vel_step
 
 		# Apply global effects to velocity then bound it to the terminal velocity
 		for post, mat in self_spr.get_voxels(None).items():
 			self.vel -= vec3(0, mat.weight * settings.gravity, 0)
 		self.vel *= (1 - settings.friction_air)
-		self.vel = self.vel.min(+settings.max_vel).max(-settings.max_vel)
+		self.vel = self.vel.min(+settings.max_velocity).max(-settings.max_velocity)
 
 	# Update this object, called by the window every frame
 	# An immediate renderer update is issued when the object changes visibility or the sprite animation advances
