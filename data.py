@@ -45,6 +45,9 @@ settings = store(
 	max_velocity = cfg.getfloat("PHYSICS", "max_velocity") or 0,
 	max_pitch = cfg.getfloat("PHYSICS", "max_pitch") or 0,
 )
+settings.proportions = ((settings.width + settings.height) / 2) / max(settings.width, settings.height)
+settings.tiles = math.ceil(settings.height / settings.threads)
+settings.chunk_radius = round(settings.chunk_size / 2)
 
 # Variables for global instances such as objects and chunk updates, accessed by the window and camera
 objects = []
@@ -355,8 +358,8 @@ class Object:
 	# If the object moved or its sprite size has changed, this must be ran both before and after the change as to refresh chunks in both cases
 	def area_update(self):
 		if self.mins < self.maxs:
-			pos_min = self.mins.snapped(settings.chunk_size, -1) + round(settings.chunk_size / 2)
-			pos_max = self.maxs.snapped(settings.chunk_size, +1) + round(settings.chunk_size / 2)
+			pos_min = self.mins.snapped(settings.chunk_size, -1) + settings.chunk_radius
+			pos_max = self.maxs.snapped(settings.chunk_size, +1) + settings.chunk_radius
 			for x in range(pos_min.x, pos_max.x, settings.chunk_size):
 				for y in range(pos_min.y, pos_max.y, settings.chunk_size):
 					for z in range(pos_min.z, pos_max.z, settings.chunk_size):
@@ -441,7 +444,7 @@ class Object:
 			# If velocity is greater than 1 the main loop will continue until the total velocity has been applied
 			# Note: Diagonal movement may intersect corners as direction checks only account for one axis
 			vel_step = vel_steps.min(+1).max(-1)
-			for post_dir, post6 in pos_dirs.items():
+			for post_dir in pos_dirs:
 				pos_dir = vec3(post_dir[0], post_dir[1], post_dir[2])
 				pos_step = vel_step * abs(pos_dir)
 				if vel_step.x * pos_dir.x > 0 or vel_step.y * pos_dir.y > 0 or vel_step.z * pos_dir.z > 0:
@@ -459,7 +462,7 @@ class Object:
 	def update(self, pos_cam: vec3):
 		# Determine object visibility based on available sprites and the object's distance to the camera
 		visible_old = self.visible
-		self.visible = self.sprites[0] and math.dist(self.pos.array(), pos_cam.array()) <= settings.dist_max + self.size.maxs()
+		self.visible = self.sprites[0] and self.pos.distance(pos_cam) <= settings.dist_max + self.size.maxs()
 		visible_new = self.visible
 		if visible_old != visible_new:
 			self.area_update()

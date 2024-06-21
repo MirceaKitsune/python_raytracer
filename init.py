@@ -13,19 +13,15 @@ class Camera:
 	def __init__(self):
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
-		self.lines = math.ceil(data.settings.height / data.settings.threads)
-		self.proportions = ((data.settings.width + data.settings.height) / 2) / max(data.settings.width, data.settings.height)
 		self.lens = data.settings.fov * math.pi / 8
 		self.chunks = {}
 
-	# Get a material from a chunk's frame at the given global position
+	# Get a chunk's frame from the given global position
 	def chunk_get(self, pos: vec3):
-		pos_chunk = pos.snapped(data.settings.chunk_size, -1)
-		pos_chunk_post = pos_chunk + round(data.settings.chunk_size / 2)
-		post = pos_chunk_post.tuple()
-		if post in self.chunks:
-			pos = math.trunc(pos - pos_chunk)
-			return self.chunks[post].get_voxel(pos)
+		pos_chunk = pos.snapped(data.settings.chunk_size, -1) + data.settings.chunk_radius
+		post_chunk = pos_chunk.tuple()
+		if post_chunk in self.chunks:
+			return self.chunks[post_chunk]
 		return None
 
 	# Create a new frame with this voxel list or delete the chunk if empty
@@ -42,8 +38,8 @@ class Camera:
 		# Randomly offset the ray's angle based on the DOF setting, fetch its direction and use it as the ray velocity
 		# Velocity must be normalized as voxels need to be checked at all integer positions, the speed of light is always 1
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
-		lens_x = (dir_x / self.proportions) * self.lens + rand(data.settings.dof)
-		lens_y = (dir_y * self.proportions) * self.lens + rand(data.settings.dof)
+		lens_x = (dir_x / data.settings.proportions) * self.lens + rand(data.settings.dof)
+		lens_y = (dir_y * data.settings.proportions) * self.lens + rand(data.settings.dof)
 		ray_rot = self.rot.rotate(vec3(0, -lens_y, +lens_x))
 		ray_dir = ray_rot.dir(True).normalize()
 		ray_detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
@@ -59,46 +55,72 @@ class Camera:
 			bounces = 0,
 		)
 
-		# Each step the ray advances through space by adding its velocity to its position, starting from the minimum distance and going up to the maximum distance
-		# If a material is found, its function is called which can modify any of the ray properties provided
-		# Note that diagonal steps can be preformed which allows penetrating through 1 voxel thick corners, checking in a stair pattern isn't done for performance reasons
+		# Chunk data relevant to this ray, updated at the beginning of the ray processing cycle
+		chunk = store(
+			pos = vec3(0, 0, 0),
+			mins = vec3(0, 0, 0),
+			maxs = vec3(0, 0, 0),
+			frame = None,
+		)
+
+		# Each step the ray advances through space by adding the velocity to its position, starting from the minimum distance and going until its lifetime runs out or it's stopped earlier
+		# Chunk data is calculated first to reflect the chunk the ray is currently in, the active chunk is changed when the ray enters the area of another chunk
+		# If a material is found, its function is called which can modify any of the ray properties, performance optimizations may terminate the ray sooner
+		# Note that diagonal steps are allowed and the ray can penetrate 1 voxel thick corners, checking in a stair pattern isn't supported due to performance
 		while ray.step < ray.life:
-			mat = self.chunk_get(ray.pos)
-			if mat:
-				# Call the material function and obtain the bounce amount, add it to the total number of bounces
-				# Normalize ray velocity after any changes to ensure the speed of light remains 1 and voxels aren't skipped or calculated twice
-				bounce = mat.function(ray, mat, data.settings)
-				ray.life /= 1 + bounce * data.settings.lod_bounces
-				ray.bounces += bounce
-				ray.vel = ray.vel.normalize()
+			if ray.pos.x < chunk.mins.x or ray.pos.y < chunk.mins.y or ray.pos.z < chunk.mins.z or ray.pos.x > chunk.maxs.x or ray.pos.y > chunk.maxs.y or ray.pos.z > chunk.maxs.z:
+				chunk.mins = ray.pos.snapped(data.settings.chunk_size, -1)
+				chunk.pos = chunk.mins + data.settings.chunk_radius
+				chunk.maxs = chunk.pos + data.settings.chunk_radius
+				post_chunk = chunk.pos.tuple()
+				chunk.frame = self.chunks[post_chunk] if post_chunk in self.chunks else None
 
-				# Enforce maximum ray properties and terminate the trace earlier to improve performance
-				if ray.bounces >= data.settings.max_bounces + 1:
-					break
-				elif ray.energy >= data.settings.max_light:
-					break
+			if chunk.frame:
+				pos = math.trunc(ray.pos - ray.pos.snapped(data.settings.chunk_size, -1))
+				mat = chunk.frame.get_voxel(pos)
+				if mat:
+					# Call the material function and obtain the bounce amount, add it to the total number of bounces
+					# Normalize ray velocity after any changes to ensure the speed of light remains 1 and voxels aren't skipped or calculated twice
+					bounce = mat.function(ray, mat, data.settings)
+					ray.life /= 1 + bounce * data.settings.lod_bounces
+					ray.bounces += bounce
+					ray.vel = ray.vel.normalize()
 
-				# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
-				# A material considers its neighbors solid if they have the same IOR, otherwise they won't affect the direction of ray reflections
-				# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
-				if mat.ior:
-					direction = (mat.ior - 0.5) * 2
-					pos_x = ray.pos + vec3(1, 0, 0) if ray.vel.x * direction < 0 else ray.pos - vec3(1, 0, 0)
-					pos_y = ray.pos + vec3(0, 1, 0) if ray.vel.y * direction < 0 else ray.pos - vec3(0, 1, 0)
-					pos_z = ray.pos + vec3(0, 0, 1) if ray.vel.z * direction < 0 else ray.pos - vec3(0, 0, 1)
-					mat_x = self.chunk_get(pos_x)
-					mat_y = self.chunk_get(pos_y)
-					mat_z = self.chunk_get(pos_z)
-					if not (mat_x and mat_x.ior == mat.ior):
-						ray.vel.x = mix(+ray.vel.x, -ray.vel.x, mat.ior)
-					if not (mat_y and mat_y.ior == mat.ior):
-						ray.vel.y = mix(+ray.vel.y, -ray.vel.y, mat.ior)
-					if not (mat_z and mat_z.ior == mat.ior):
-						ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
+					# Enforce maximum ray properties and terminate the trace earlier to improve performance
+					if ray.bounces >= data.settings.max_bounces + 1:
+						break
+					elif ray.energy >= data.settings.max_light:
+						break
 
-			# Advance the ray by one unit each move
-			ray.step += 1
-			ray.pos += ray.vel
+					# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
+					# A material considers its neighbors solid if they have the same IOR, otherwise they won't affect the direction of ray reflections
+					# If IOR is above 0.5 check the neighbor opposite the ray direction in that axis, otherwise check the neighbor in the ray's direction
+					# As neighboring voxels may be located in other chunks, try the local chunk first and fetch from another chunk if not found
+					if mat.ior:
+						direction = (mat.ior - 0.5) * 2
+						ray_pos_x = ray.pos + vec3(1, 0, 0) if ray.vel.x * direction < 0 else ray.pos - vec3(1, 0, 0)
+						ray_pos_y = ray.pos + vec3(0, 1, 0) if ray.vel.y * direction < 0 else ray.pos - vec3(0, 1, 0)
+						ray_pos_z = ray.pos + vec3(0, 0, 1) if ray.vel.z * direction < 0 else ray.pos - vec3(0, 0, 1)
+						pos_x = math.trunc(ray_pos_x - ray_pos_x.snapped(data.settings.chunk_size, -1))
+						pos_y = math.trunc(ray_pos_y - ray_pos_y.snapped(data.settings.chunk_size, -1))
+						pos_z = math.trunc(ray_pos_z - ray_pos_z.snapped(data.settings.chunk_size, -1))
+						chunk_x = chunk.frame if ray_pos_x >= chunk.mins and ray_pos_x <= chunk.maxs else self.chunk_get(ray_pos_x)
+						chunk_y = chunk.frame if ray_pos_y >= chunk.mins and ray_pos_y <= chunk.maxs else self.chunk_get(ray_pos_y)
+						chunk_z = chunk.frame if ray_pos_z >= chunk.mins and ray_pos_z <= chunk.maxs else self.chunk_get(ray_pos_z)
+						mat_x = chunk_x.get_voxel(pos_x) if chunk_x else None
+						mat_y = chunk_y.get_voxel(pos_y) if chunk_y else None
+						mat_z = chunk_z.get_voxel(pos_z) if chunk_z else None
+						if not (mat_x and mat_x.ior == mat.ior):
+							ray.vel.x = mix(+ray.vel.x, -ray.vel.x, mat.ior)
+						if not (mat_y and mat_y.ior == mat.ior):
+							ray.vel.y = mix(+ray.vel.y, -ray.vel.y, mat.ior)
+						if not (mat_z and mat_z.ior == mat.ior):
+							ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
+
+			# Advance the ray, move by one unit inside a valid chunk or skip based on the safest possible distance to the nearest chunk if void
+			step = 1 if chunk.frame else max(1, data.settings.chunk_radius - ray.pos.distance(chunk.pos))
+			ray.step += step
+			ray.pos += ray.vel * step
 
 		# Run the background function and return the resulting color, fall back to black if a color wasn't set
 		if data.background:
@@ -109,12 +131,11 @@ class Camera:
 	# If static noise is enabled, the random seed is set to an index unique to this pixel and sample so noise in ray calculations is static instead of flickering
 	# The batch number decides which group of pixels should be rendered this call using a pattern generated from the 2D position of the pixel
 	def tile(self, image: str, sample: int, thread: int, batch: int):
-		tile = pg.image.frombytes(image, (data.settings.width, self.lines), "RGB")
-
+		tile = pg.image.frombytes(image, (data.settings.width, data.settings.tiles), "RGB")
 		for x in range(data.settings.width):
-			for y in range(self.lines):
+			for y in range(data.settings.tiles):
 				if (x ^ y) % data.settings.batches == batch:
-					line_y = y + (self.lines * thread)
+					line_y = y + (data.settings.tiles * thread)
 					dir_x = -1 + (x / data.settings.width) * 2
 					dir_y = -1 + (line_y / data.settings.height) * 2
 
@@ -126,16 +147,14 @@ class Camera:
 		return (pg.image.tobytes(tile, "RGB"), sample, thread)
 
 	# Update the position and rotation this camera will shoot rays from
-	# Valid objects are compiled to an object list local to the camera which is used once per redraw
+	# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
 	def update(self, cam_pos: vec3, cam_rot: vec3):
 		self.pos = cam_pos
 		self.rot = cam_rot
-
-		# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
 		for pos_center in data.objects_chunks_update:
 			voxels = {}
-			pos_min = pos_center - round(data.settings.chunk_size / 2)
-			pos_max = pos_center + round(data.settings.chunk_size / 2)
+			pos_min = pos_center - data.settings.chunk_radius
+			pos_max = pos_center + data.settings.chunk_radius
 			for obj in data.objects:
 				if obj.visible and obj.intersects(pos_min, pos_max):
 					spr = obj.get_sprite()
@@ -160,7 +179,6 @@ class Window:
 		pg.display.set_caption("Voxel Tracer")
 		self.rect = vec2(data.settings.width, data.settings.height)
 		self.rect_win = self.rect * data.settings.scale
-		self.lines = math.ceil(data.settings.height / data.settings.threads)
 		self.screen = pg.display.set_mode(self.rect_win.tuple(), pg.HWSURFACE)
 		self.canvas = pg.Surface(self.rect.tuple(), pg.HWSURFACE)
 		self.font = pg.font.SysFont(None, 24)
@@ -177,7 +195,7 @@ class Window:
 			self.tiles.append([])
 			self.batches.append([])
 			for t in range(data.settings.threads):
-				surface = pg.Surface((data.settings.width, self.lines), pg.HWSURFACE)
+				surface = pg.Surface((data.settings.width, data.settings.tiles), pg.HWSURFACE)
 				image = pg.image.tobytes(surface, "RGB")
 				self.tiles[s].append(image)
 				self.batches[s].append(0)
@@ -213,8 +231,8 @@ class Window:
 			tiles = []
 			for t in range(len(self.tiles[s])):
 				if self.tiles[s][t]:
-					tile = pg.image.frombytes(self.tiles[s][t], (data.settings.width, self.lines), "RGB")
-					tiles.append((tile, (0, t * self.lines)))
+					tile = pg.image.frombytes(self.tiles[s][t], (data.settings.width, data.settings.tiles), "RGB")
+					tiles.append((tile, (0, t * data.settings.tiles)))
 					self.pool.apply_async(self.cam.tile, args = (self.tiles[s][t], s, t, self.batches[s][t]), callback = self.draw_tile)
 					self.tiles[s][t] = None
 			if tiles:

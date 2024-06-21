@@ -107,6 +107,9 @@ class vec2:
 	def array(self):
 		return [self.x, self.y]
 
+	def tuple(self):
+		return (self.x, self.y)
+
 	def mins(self):
 		return min(self.x, self.y)
 
@@ -125,8 +128,11 @@ class vec2:
 		else:
 			return vec2(max(self.x, other), max(self.y, other))
 
-	def tuple(self):
-		return (self.x, self.y)
+	def distance(self, other):
+		return math.dist(self.array(), other.array())
+
+	def total(self):
+		return (abs(self.x) + abs(self.y)) / 2
 
 	def mix(self, other, bias1):
 		bias2 = 1 - bias1
@@ -244,6 +250,9 @@ class vec3:
 	def array(self):
 		return [self.x, self.y, self.z]
 
+	def tuple(self):
+		return (self.x, self.y, self.z)
+
 	def mins(self):
 		return min(self.x, self.y, self.z)
 
@@ -262,8 +271,11 @@ class vec3:
 		else:
 			return vec3(max(self.x, other), max(self.y, other), max(self.z, other))
 
-	def tuple(self):
-		return (self.x, self.y, self.z)
+	def distance(self, other):
+		return math.dist(self.array(), other.array())
+
+	def total(self):
+		return (abs(self.x) + abs(self.y) + abs(self.z)) / 3
 
 	def mix(self, other, bias1):
 		bias2 = 1 - bias1
@@ -310,12 +322,6 @@ class rgb:
 
 	def tuple(self):
 		return (self.r, self.g, self.b)
-
-	def raw(self):
-		return rgb(self.r / 255, self.g / 255, self.b / 255)
-
-	def raw_total(self):
-		return (self.r + self.g + self.b) / 765
 
 	def mix(self, col, bias1):
 		bias2 = 1 - bias1
