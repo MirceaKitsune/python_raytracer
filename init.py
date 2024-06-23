@@ -41,7 +41,7 @@ class Camera:
 			del self.chunks[post]
 
 	# Trace the pixel based on the given 2D direction which is used to calculate ray velocity from lens distorsion: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
-	def trace(self, dir_x: float, dir_y: float, sample: int):
+	def trace(self, dir_x: float, dir_y: float, detail: int):
 		# Randomly offset the ray's angle based on the DOF setting, fetch its direction and use it as the ray velocity
 		# Velocity must be normalized as voxels need to be checked at all integer positions, the speed of light is always 1
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
@@ -49,7 +49,6 @@ class Camera:
 		lens_y = (dir_y * data.settings.proportions) * self.lens + rand(data.settings.dof)
 		ray_rot = self.rot.rotate(vec3(0, -lens_y, +lens_x))
 		ray_dir = ray_rot.dir(True).normalize()
-		ray_detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
 
 		# Ray data is kept in a data store so it can be easily delivered to material functions and support custom properties
 		ray = store(
@@ -58,7 +57,7 @@ class Camera:
 			pos = self.pos + ray_dir * data.settings.dist_min,
 			vel = ray_dir,
 			step = 0,
-			life = (data.settings.dist_max - data.settings.dist_min) * ray_detail,
+			life = (data.settings.dist_max - data.settings.dist_min) * detail,
 			bounces = 0,
 		)
 
@@ -137,7 +136,7 @@ class Camera:
 	# Called by threads with a tile image to paint to, creates a new surface for this thread to paint to which is returned to the main thread as a byte string
 	# If static noise is enabled, the random seed is set to an index unique to this pixel and sample so noise in ray calculations is static instead of flickering
 	# The batch number decides which group of pixels should be rendered this call using a pattern generated from the 2D position of the pixel
-	def tile(self, image: str, sample: int, thread: int, batch: int):
+	def tile(self, image: str, thread: int, batch: int):
 		tile = pg.image.frombytes(image, (data.settings.width, data.settings.tiles), "RGB")
 		for x in range(data.settings.width):
 			for y in range(data.settings.tiles):
@@ -145,13 +144,21 @@ class Camera:
 					line_y = y + (data.settings.tiles * thread)
 					dir_x = -1 + (x / data.settings.width) * 2
 					dir_y = -1 + (line_y / data.settings.height) * 2
+					detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
 
-					if data.settings.static:
-						random.seed((1 + x) * (1 + line_y) * (1 + sample))
-					tile.set_at((x, y), self.trace(dir_x, dir_y, sample).tuple())
+					# Apply the average pixel color from each sample, the number of samples is influenced by ray detail
+					colors = []
+					samples = max(1, round(data.settings.samples * detail))
+					for sample in range(samples):
+						if data.settings.static:
+							random.seed((1 + x) * (1 + line_y) * (1 + sample))
+						color = self.trace(dir_x, dir_y, detail)
+						colors.append(color.array())
+					color = average(colors)
+					tile.set_at((x, y), (color[0], color[1], color[2]))
 					random.seed(None)
 
-		return (pg.image.tobytes(tile, "RGB"), sample, thread)
+		return (pg.image.tobytes(tile, "RGB"), thread)
 
 	# Update the position and rotation this camera will shoot rays from followed by chunk frames
 	def update(self, cam_pos: vec3, cam_rot: vec3):
@@ -203,17 +210,14 @@ class Window:
 		self.mouselook = True
 		self.running = True
 
-		# Prepare the containers for samples and batches, each sample stores an image slot for every thread which is cleared after being drawn
+		# Prepare the containers for tiles and batches, each tile stores an image slot per thread which is cleared after being drawn
 		self.tiles = []
 		self.batches = []
-		for s in range(data.settings.samples):
-			self.tiles.append([])
-			self.batches.append([])
-			for t in range(data.settings.threads):
-				surface = pg.Surface((data.settings.width, data.settings.tiles), pg.HWSURFACE)
-				image = pg.image.tobytes(surface, "RGB")
-				self.tiles[s].append(image)
-				self.batches[s].append(0)
+		for t in range(data.settings.threads):
+			surface = pg.Surface((data.settings.width, data.settings.tiles), pg.HWSURFACE)
+			image = pg.image.tobytes(surface, "RGB")
+			self.tiles.append(image)
+			self.batches.append(0)
 
 		# Main loop, limited by FPS with a slower clock when the window isn't focused
 		while self.running:
@@ -225,37 +229,30 @@ class Window:
 				self.pool.join()
 				exit
 
-	# Called by the thread pool on finish, adds the image to the appropriate sample and thread for the main thread to mix
+	# Called by the thread pool on finish, adds the image to the appropriate thread for the main thread to mix
 	def draw_tile(self, result):
-		image, sample, thread = result
-		self.tiles[sample][thread] = image
-		self.batches[sample][thread] = (self.batches[sample][thread] + 1) % data.settings.batches
+		image, thread = result
+		self.tiles[thread] = image
+		self.batches[thread] = (self.batches[thread] + 1) % data.settings.batches
 
-	# Request the camera to draw a new tile for each thread and sample
+	# Request the camera to draw a new tile for each thread
 	def draw(self):
-		# If sync is enabled, skip updates until all samples and tiles have finished
+		# If sync is enabled, skip updates until all tiles have finished
 		if data.settings.sync:
-			for sample in self.tiles:
-				for tile in sample:
-					if not tile:
-						return
+			for tile in self.tiles:
+				if not tile:
+					return
 
-		# Add available tiles to their corresponding sample, blit valid samples to the canvas with performance information on top
-		samples = []
-		for s in range(len(self.tiles)):
-			tiles = []
-			for t in range(len(self.tiles[s])):
-				if self.tiles[s][t]:
-					tile = pg.image.frombytes(self.tiles[s][t], (data.settings.width, data.settings.tiles), "RGB")
-					tiles.append((tile, (0, t * data.settings.tiles)))
-					self.pool.apply_async(self.cam.tile, args = (self.tiles[s][t], s, t, self.batches[s][t]), callback = self.draw_tile)
-					self.tiles[s][t] = None
-			if tiles:
-				sample = pg.Surface.copy(self.canvas)
-				sample.blits(tiles)
-				samples.append(sample)
-		if samples:
-			self.canvas = pg.transform.average_surfaces(samples)
+		# Add available tiles to the canvas with performance information on top
+		tiles = []
+		for t in range(len(self.tiles)):
+			if self.tiles[t]:
+				tile = pg.image.frombytes(self.tiles[t], (data.settings.width, data.settings.tiles), "RGB")
+				tiles.append((tile, (0, t * data.settings.tiles)))
+				self.pool.apply_async(self.cam.tile, args = (self.tiles[t], t, self.batches[t]), callback = self.draw_tile)
+				self.tiles[t] = None
+		if tiles:
+			self.canvas.blits(tiles)
 			canvas = pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) if data.settings.smooth else pg.transform.scale(self.canvas, self.rect_win.tuple())
 			text_info = str(data.settings.width) + " x " + str(data.settings.height) + " (" + str(data.settings.width * data.settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(data.settings.fps) + " FPS"
 			text = self.font.render(text_info, True, (255, 255, 255))
