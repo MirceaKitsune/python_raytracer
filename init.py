@@ -14,6 +14,7 @@ class Camera:
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
 		self.lens = data.settings.fov * math.pi / 8
+		self.timer = 0
 		self.chunks = {}
 
 	# Get the LOD level of a chunk based on its distance to the camera position
@@ -161,37 +162,42 @@ class Camera:
 		return (pg.image.tobytes(tile, "RGB"), thread)
 
 	# Update the position and rotation this camera will shoot rays from followed by chunk frames
-	def update(self, cam_pos: vec3, cam_rot: vec3):
-		self.pos = cam_pos
-		self.rot = cam_rot
+	def update(self, pos: vec3, rot: vec3, time: float):
+		self.pos = pos
+		self.rot = rot
 
-		# Scan existing chunks and check if their LOD changed, force recalculation if so
-		for post, frame in self.chunks.items():
-			pos = vec3(post[0], post[1], post[2])
-			if not pos in data.objects_chunks_update and self.chunk_get_lod(pos) != frame.lod:
-				data.objects_chunks_update.append(pos)
+		# Preform updates to chunks, limited by the chunk update rate setting
+		self.timer += time
+		if self.timer >= data.settings.chunk_time:
+			self.timer -= data.settings.chunk_time
 
-		# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
-		for pos_center in data.objects_chunks_update:
-			pos_min = pos_center - data.settings.chunk_radius
-			pos_max = pos_center + data.settings.chunk_radius
-			lod = self.chunk_get_lod(pos_center)
-			voxels = {}
-			for obj in data.objects:
-				if obj.visible and obj.intersects(pos_min, pos_max):
-					spr = obj.get_sprite()
-					for x in range(pos_min.x, pos_max.x, lod):
-						for y in range(pos_min.y, pos_max.y, lod):
-							for z in range(pos_min.z, pos_max.z, lod):
-								pos = vec3(x, y, z)
-								if obj.intersects(pos, pos):
-									mat = spr.get_voxel(None, pos - obj.mins)
-									if mat:
-										pos_chunk = pos - pos_min
-										post_chunk = pos_chunk.tuple()
-										voxels[post_chunk] = mat
-			self.chunk_set(pos_center, voxels, lod)
-		data.objects_chunks_update = []
+			# Scan existing chunks and check if their LOD changed, force recalculation if so
+			for post, frame in self.chunks.items():
+				pos = vec3(post[0], post[1], post[2])
+				if not pos in data.objects_chunks_update and self.chunk_get_lod(pos) != frame.lod:
+					data.objects_chunks_update.append(pos)
+
+			# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
+			for pos_center in data.objects_chunks_update:
+				pos_min = pos_center - data.settings.chunk_radius
+				pos_max = pos_center + data.settings.chunk_radius
+				lod = self.chunk_get_lod(pos_center)
+				voxels = {}
+				for obj in data.objects:
+					if obj.visible and obj.intersects(pos_min, pos_max):
+						spr = obj.get_sprite()
+						for x in range(pos_min.x, pos_max.x, lod):
+							for y in range(pos_min.y, pos_max.y, lod):
+								for z in range(pos_min.z, pos_max.z, lod):
+									pos = vec3(x, y, z)
+									if obj.intersects(pos, pos):
+										mat = spr.get_voxel(None, pos - obj.mins)
+										if mat:
+											pos_chunk = pos - pos_min
+											post_chunk = pos_chunk.tuple()
+											voxels[post_chunk] = mat
+				self.chunk_set(pos_center, voxels, lod)
+			data.objects_chunks_update = []
 
 # Window: Initializes Pygame and starts the main loop, handles all updates and redraws the canvas using a Camera instance
 class Window:
@@ -260,10 +266,9 @@ class Window:
 			self.screen.blit(text, (0, 0))
 
 	# Handle keyboard and mouse input, apply object movement for the camera controlled object
-	def input(self, obj_cam: data.Object):
+	def input(self, obj_cam: data.Object, time: float):
 		keys = pg.key.get_pressed()
 		mods = pg.key.get_mods()
-		time = self.clock.get_time() / 1000
 		units = time * data.settings.speed_move
 		units_jump = time * data.settings.speed_jump
 		units_mouse = time * data.settings.speed_mouse
@@ -334,8 +339,9 @@ class Window:
 			obj.update(self.cam.pos)
 
 		d = obj_cam.rot.dir(False)
-		self.cam.update(obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z), obj_cam.rot)
-		self.input(obj_cam)
+		time = self.clock.get_time() / 1000
+		self.input(obj_cam, time)
+		self.cam.update(obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z), obj_cam.rot, time)
 		self.draw()
 		pg.display.update()
 		pg.mouse.set_visible(not self.mouselook)

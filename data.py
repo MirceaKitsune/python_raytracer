@@ -25,6 +25,7 @@ settings = store(
 	samples = cfg.getint("RENDER", "samples") or 1,
 	fov = cfg.getfloat("RENDER", "fov") or 90,
 	falloff = cfg.getfloat("RENDER", "falloff") or 0,
+	chunk_rate = cfg.getint("RENDER", "chunk_rate") or 0,
 	chunk_size = cfg.getint("RENDER", "chunk_size") or 16,
 	chunk_lod = cfg.getint("RENDER", "chunk_lod") or 1,
 	dof = cfg.getfloat("RENDER", "dof") or 0,
@@ -45,9 +46,11 @@ settings = store(
 	speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 1,
 	max_velocity = cfg.getfloat("PHYSICS", "max_velocity") or 0,
 	max_pitch = cfg.getfloat("PHYSICS", "max_pitch") or 0,
+	dist_move = cfg.getint("PHYSICS", "dist_move") or 0,
 )
 settings.proportions = ((settings.width + settings.height) / 2) / max(settings.width, settings.height)
 settings.tiles = math.ceil(settings.height / settings.threads)
+settings.chunk_time = settings.chunk_rate / 1000
 settings.chunk_radius = round(settings.chunk_size / 2)
 
 # Variables for global instances such as objects and chunk updates, accessed by the window and camera
@@ -473,8 +476,8 @@ class Object:
 		if visible_old != visible_new:
 			self.area_update()
 
-		# Update the animation frame and calculate physics based on the new sprite
-		if self.visible:
+		# Update the animation frame and calculate physics based on the new sprite, limited by the physics sleep distance setting
+		if self.visible and self.pos.distance(pos_cam) <= settings.dist_move:
 			spr = self.get_sprite()
 			frame_old = spr.frame
 			spr.anim_update()
