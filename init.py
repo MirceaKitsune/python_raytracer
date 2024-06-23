@@ -16,6 +16,13 @@ class Camera:
 		self.lens = data.settings.fov * math.pi / 8
 		self.chunks = {}
 
+	# Get the LOD level of a chunk based on its distance to the camera position
+	def chunk_get_lod(self, pos: vec3):
+		if data.settings.chunk_lod > 1:
+			lod = pos.distance(self.pos) / (data.settings.dist_max / data.settings.chunk_lod)
+			return min(1 + math.trunc(lod), data.settings.chunk_lod)
+		return 1
+
 	# Get a chunk's frame from the given global position
 	def chunk_get(self, pos: vec3):
 		pos_chunk = pos.snapped(data.settings.chunk_size, -1) + data.settings.chunk_radius
@@ -25,10 +32,10 @@ class Camera:
 		return None
 
 	# Create a new frame with this voxel list or delete the chunk if empty
-	def chunk_set(self, pos: vec3, voxels: dict):
+	def chunk_set(self, pos: vec3, voxels: dict, lod: int):
 		post = pos.tuple()
 		if voxels:
-			self.chunks[post] = data.Frame(packed = True)
+			self.chunks[post] = data.Frame(packed = True, lod = lod)
 			self.chunks[post].set_voxels(voxels)
 		elif post in self.chunks:
 			del self.chunks[post]
@@ -117,8 +124,8 @@ class Camera:
 						if not (mat_z and mat_z.ior == mat.ior):
 							ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
 
-			# Advance the ray, move by one unit inside a valid chunk or skip based on the safest possible distance to the nearest chunk if void
-			step = 1 if chunk.frame else max(1, data.settings.chunk_radius - ray.pos.distance(chunk.pos))
+			# Advance the ray, move by frame LOD if inside a valid chunk or skip toward the safest possible distance to the nearest chunk if void
+			step = chunk.frame.lod if chunk.frame else max(1, data.settings.chunk_radius - ray.pos.distance(chunk.pos))
 			ray.step += step
 			ray.pos += ray.vel * step
 
@@ -146,21 +153,29 @@ class Camera:
 
 		return (pg.image.tobytes(tile, "RGB"), sample, thread)
 
-	# Update the position and rotation this camera will shoot rays from
-	# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
+	# Update the position and rotation this camera will shoot rays from followed by chunk frames
 	def update(self, cam_pos: vec3, cam_rot: vec3):
 		self.pos = cam_pos
 		self.rot = cam_rot
+
+		# Scan existing chunks and check if their LOD changed, force recalculation if so
+		for post, frame in self.chunks.items():
+			pos = vec3(post[0], post[1], post[2])
+			if not pos in data.objects_chunks_update and self.chunk_get_lod(pos) != frame.lod:
+				data.objects_chunks_update.append(pos)
+
+		# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
 		for pos_center in data.objects_chunks_update:
-			voxels = {}
 			pos_min = pos_center - data.settings.chunk_radius
 			pos_max = pos_center + data.settings.chunk_radius
+			lod = self.chunk_get_lod(pos_center)
+			voxels = {}
 			for obj in data.objects:
 				if obj.visible and obj.intersects(pos_min, pos_max):
 					spr = obj.get_sprite()
-					for x in range(pos_min.x, pos_max.x):
-						for y in range(pos_min.y, pos_max.y):
-							for z in range(pos_min.z, pos_max.z):
+					for x in range(pos_min.x, pos_max.x, lod):
+						for y in range(pos_min.y, pos_max.y, lod):
+							for z in range(pos_min.z, pos_max.z, lod):
 								pos = vec3(x, y, z)
 								if obj.intersects(pos, pos):
 									mat = spr.get_voxel(None, pos - obj.mins)
@@ -168,7 +183,7 @@ class Camera:
 										pos_chunk = pos - pos_min
 										post_chunk = pos_chunk.tuple()
 										voxels[post_chunk] = mat
-			self.chunk_set(pos_center, voxels)
+			self.chunk_set(pos_center, voxels, lod)
 		data.objects_chunks_update = []
 
 # Window: Initializes Pygame and starts the main loop, handles all updates and redraws the canvas using a Camera instance

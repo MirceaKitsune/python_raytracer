@@ -81,7 +81,7 @@ mat_light = data.Material(
 	elasticity = 0.5,
 )
 
-spr = data.Sprite(size = vec3(64, 64, 64), frames = 1)
+spr = data.Sprite(size = vec3(64, 64, 64), frames = 1, lod = 1)
 spr.set_voxels_area(0, vec3(0, 0, 0), vec3(63, 63, 0), mat_opaque_red)
 spr.set_voxels_area(0, vec3(0, 0, 0), vec3(0, 63, 63), mat_opaque_green)
 spr.set_voxels_area(0, vec3(0, 0, 0), vec3(63, 0, 63), mat_opaque_blue)
@@ -90,7 +90,7 @@ spr.set_voxels_area(0, vec3(3, 1, 9), vec3(7, 5, 13), mat_light)
 obj = data.Object(pos = vec3(0, 0, 0), rot = vec3(0, 0, 0), vel = vec3(0, 0, 0), physics = False)
 obj.set_sprite(spr)
 
-spr_player = data.Sprite(size = vec3(2, 4, 2), frames = 1)
+spr_player = data.Sprite(size = vec3(2, 4, 2), frames = 1, lod = 1)
 spr_player.set_voxels_area(0, vec3(0, 0, 0), vec3(1, 3, 1), mat_rough_white)
 obj_player = data.Object(pos = vec3(0, -8, 0), rot = vec3(0, 0, 0), vel = vec3(0, 0, 0), physics = True)
 obj_player.set_sprite(spr_player)

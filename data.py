@@ -26,6 +26,7 @@ settings = store(
 	fov = cfg.getfloat("RENDER", "fov") or 90,
 	falloff = cfg.getfloat("RENDER", "falloff") or 0,
 	chunk_size = cfg.getint("RENDER", "chunk_size") or 16,
+	chunk_lod = cfg.getint("RENDER", "chunk_lod") or 1,
 	dof = cfg.getfloat("RENDER", "dof") or 0,
 	batches = cfg.getint("RENDER", "batches") or 1,
 	dist_min = cfg.getint("RENDER", "dist_min") or 0,
@@ -68,9 +69,10 @@ class Material:
 # Frame: A subset of Sprite, also used by camera chunks to store render data, stores instances of Material to describe a single 3D model
 class Frame:
 	def __init__(self, **settings):
-		# If voxel compression is enabled, describe full areas as their min / max corners instead of storing every voxel at its position
-		# This reduces the quantity of data in storage but makes data access and updates slower, enable when data compression is important
+		# If voxel compression is enabled, describe full areas as their min / max corners instead of storing every voxel individually
+		# If LOD is higher than 1, positions will be interpreted in lower steps so less data is used to represent a greater area
 		self.packed = settings["packed"] if "packed" in settings else False
+		self.lod = settings["lod"] if "lod" in settings else 1
 
 		# data3 stores a single material at a precise position and is indexed by (x, y, z)
 		# data6 stores a cubic area filled with a material and is indexed by (x_min, y_min, z_min, x_max, y_max, z_max)
@@ -94,6 +96,7 @@ class Frame:
 
 	# Get the voxel at this position from the frame, attempt to fetch by index from data3 followed by scanning data6 if not found
 	def get_voxel(self, pos: vec3):
+		pos = pos.snapped(self.lod, -1) if self.lod > 1 else pos
 		post3 = pos.tuple()
 		if post3 in self.data3:
 			return self.data3[post3]
@@ -105,6 +108,7 @@ class Frame:
 
 	# Set a voxel at this position on the frame, unpack the affected area since its content will be changed
 	def set_voxel(self, pos: vec3, mat: Material):
+		pos = pos.snapped(self.lod, -1) if self.lod > 1 else pos
 		self.unpack(pos)
 		post3 = pos.tuple()
 		if mat:
@@ -117,6 +121,7 @@ class Frame:
 	def set_voxels(self, voxels: dict):
 		for post3, mat in voxels.items():
 			pos = vec3(post3[0], post3[1], post3[2])
+			pos = pos.snapped(self.lod, -1) if self.lod > 1 else pos
 			self.unpack(pos)
 			if mat:
 				self.data3[post3] = mat
@@ -186,6 +191,7 @@ class Sprite:
 	def __init__(self, **settings):
 		# Sprite size needs to be an even number as to not break object calculations, voxels are located at integer positions and checking voxel position from object center would result in 0.5
 		self.size = settings["size"] if "size" in settings else vec3(0, 0, 0)
+		self.lod = settings["lod"] if "lod" in settings else 1
 		if self.size.x % 2 != 0 or self.size.y % 2 != 0 or self.size.z % 2 != 0:
 			print("Warning: Sprite size " + str(self.size) + " contains a float or odd number in one or more directions, affected axes will be rounded and enlarged by one unit.")
 			self.size.x = math.trunc(self.size.x) + 1 if math.trunc(self.size.x) % 2 != 0 else math.trunc(self.size.x)
@@ -196,7 +202,7 @@ class Sprite:
 		self.frame = self.frame_time = self.frame_start = self.frame_end = 0
 		self.frames = []
 		for i in range(settings["frames"]):
-			self.frames.append(Frame(packed = True))
+			self.frames.append(Frame(packed = True, lod = self.lod))
 
 	# Create a copy of this sprite that can be edited independently
 	def clone(self):

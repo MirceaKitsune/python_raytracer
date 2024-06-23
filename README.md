@@ -47,6 +47,7 @@ Settings are stored within the mod's `config.cfg` file and can be used to modify
     - `samples`: The number of samples to preform per pixel. Values higher than 1 enable multisampling, this makes each CPU thread process more than one image per frame. Looks softer and reduces roughness by doing multiple traces per pixel, but also reduces rendering performance and increases probability of banding: If not all samples are received during the same frame, they will be blended in random order and produce flickering.
     - `falloff`: The amount by which light tapers off with hits, controls overall brightness. 0 is the brightest settings as it makes rays not lose energy between bounces, increasing this offers more vivid colors but also makes the scene darker.
     - `chunk_size`: The chunk size used by the renderer. Smaller values result in more small boxes holding less data, larger values store fewer frames containing more voxels, eg: Each chunk holds 64 voxels if this is 4 (4 x 4 x 4). Chunk are recalculated when any object touching them moves or changes sprite, large values result in more recalculations thus lower performance. Must be an even number and less than `dist_max`, 16 is recommended for the best performance.
+    - `chunk_lod`: Number of LOD steps for chunks. Values above 1 cause chunks that are further from the camera to be stored at a lower resolution. This reduces data and improves performance, but you may see distant objects become blocky. Must always be lower than `chunk_size`, the larger the draw distance the safer it is to increase this.
     - `fov`: Field of view in degrees, higher values make the viewport wider.
     - `dof`: Depth of field in degrees, higher values result in more randomness added to the initial ray velocity and distance blur.
     - `batches`: Total number of frames it takes to cover all pixels on the screen, only pixels associated with a batch are updated each frame. Must be at least 1 which disables pixel skipping, small values like 2 or 4 are recommended. Improves perceived performance by allowing some pixels to render faster, but produces a noticeable mosaic pattern as other pixels take extra frames to update.
@@ -99,13 +100,13 @@ There are 3 main components to a scene: Materials, sprites, objects. Each acts a
 
 ```
 mat = data.Material(function = builtin.material, albedo = rgb(255, 127, 0))
-spr = data.Sprite(size = vec3(16, 16, 16), frames = 1)
+spr = data.Sprite(size = vec3(16, 16, 16), frames = 1, lod = 1)
 spr.set_voxels_area(0, vec3(0, 0, 0), vec3(15, 15, 0), mat)
 obj = data.Object(pos = vec3(0, 0, 0))
 obj.set_sprite(spr)
 ```
 
-The above will create an orange wall covering the -Z face of the 16x16x16 sprite. Note that the maximum position we can set a voxel at is 15 although the size is 16, the count starts from 0 so 1 must be subtracted. When created sprites are given a number of animation frames, in this case the sprite is static so only one frame was provided: The first parameter of `set_voxel` or `set_voxels_area` is the frame we're editing in this case 0.
+The above will create an orange wall covering the -Z face of the 16x16x16 sprite. Note that the maximum position we can set a voxel at is 15 although the size is 16, the count starts from 0 so 1 must be subtracted. When created sprites are given a number of animation frames, in this case the sprite is static so only one frame was provided. Sprites can also be given a LOD above 1, this allows them to be stored at a lower resolution which improves performance at the cost of detail. The first parameter of `set_voxel` or `set_voxels_area` is the frame we're editing in this case 0.
 
 Below is a list of functions and variables built into each class which are likely to be used when designing your own world. Read the code comments above every definition inside data.py where each class is defined for more technical information on other builtin functions, as well as the default scene for a full example of how everything is set up.
 
