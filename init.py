@@ -14,38 +14,36 @@ class Camera:
 		self.pos = vec3(0, 0, 0)
 		self.rot = vec3(0, 0, 0)
 		self.lens = data.settings.fov * math.pi / 8
-		self.timer = 0
-		self.chunks = {}
 
-	# Get the LOD level of a chunk based on its distance to the camera position
-	def chunk_get_lod(self, pos: vec3):
-		if data.settings.chunk_lod > 1:
-			lod = pos.distance(self.pos) / (data.settings.dist_max / data.settings.chunk_lod)
-			return min(1 + math.trunc(lod), data.settings.chunk_lod)
-		return 1
+		# Prepare the container for chunks, indexed by the thread number
+		self.chunks = []
+		for t in range(data.settings.threads):
+			self.chunks.append({})
 
-	# Get a chunk's frame from the given global position
-	def chunk_get(self, pos: vec3):
+	# Get a chunk's frame from the given global position and current thread
+	def chunk_get(self, thread: int, pos: vec3):
 		pos_chunk = pos.snapped(data.settings.chunk_size, -1) + data.settings.chunk_radius
 		post_chunk = pos_chunk.tuple()
-		if post_chunk in self.chunks:
-			return self.chunks[post_chunk]
+		if post_chunk in self.chunks[thread]:
+			return self.chunks[thread][post_chunk]
 		return None
 
-	# Create a new frame with this voxel list or delete the chunk if empty
-	def chunk_set(self, pos: vec3, voxels: dict, lod: int):
-		post = pos.tuple()
-		if voxels:
-			self.chunks[post] = data.Frame(packed = True, lod = lod)
-			self.chunks[post].set_voxels(voxels)
-		elif post in self.chunks:
-			del self.chunks[post]
+	# Assign the appropriate chunks based on the positions last traversed by rays in each thread, the global chunk list and traversed positions are both indexed by the thread number
+	# This enforces occlusion culling and view frustum culling, by giving each thread a curated list containing only chunks the ray traversed through during the previous trace
+	def chunk_assign(self, chunks: dict, traversed: list):
+		for t in range(len(self.chunks)):
+			self.chunks[t] = {}
+			for post in chunks:
+				if post in traversed[t]:
+					self.chunks[t][post] = chunks[post]
 
 	# Trace the pixel based on the given 2D direction which is used to calculate ray velocity from lens distorsion: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
-	def trace(self, dir_x: float, dir_y: float, detail: int):
+	# Returns the ray data after processing is over, the result represents the ray state during the last step it has preformed
+	def trace(self, thread: int, batch: int, dir_x: float, dir_y: float):
 		# Randomly offset the ray's angle based on the DOF setting, fetch its direction and use it as the ray velocity
 		# Velocity must be normalized as voxels need to be checked at all integer positions, the speed of light is always 1
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
+		detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
 		lens_x = (dir_x / data.settings.proportions) * self.lens + rand(data.settings.dof)
 		lens_y = (dir_y * data.settings.proportions) * self.lens + rand(data.settings.dof)
 		ray_rot = self.rot.rotate(vec3(0, -lens_y, +lens_x))
@@ -60,6 +58,7 @@ class Camera:
 			step = 0,
 			life = (data.settings.dist_max - data.settings.dist_min) * detail,
 			bounces = 0,
+			traversed = [],
 		)
 
 		# Chunk data relevant to this ray, updated at the beginning of the ray processing cycle
@@ -74,13 +73,16 @@ class Camera:
 		# Chunk data is calculated first to reflect the chunk the ray is currently in, the active chunk is changed when the ray enters the area of another chunk
 		# If a material is found, its function is called which can modify any of the ray properties, performance optimizations may terminate the ray sooner
 		# Note that diagonal steps are allowed and the ray can penetrate 1 voxel thick corners, checking in a stair pattern isn't supported due to performance
+		# The ray also returns the positions of chunks it traveled through, for best balance between accuracy and performance this is only calculated for the first batch
 		while ray.step < ray.life:
 			if ray.pos.x < chunk.mins.x or ray.pos.y < chunk.mins.y or ray.pos.z < chunk.mins.z or ray.pos.x > chunk.maxs.x or ray.pos.y > chunk.maxs.y or ray.pos.z > chunk.maxs.z:
 				chunk.mins = ray.pos.snapped(data.settings.chunk_size, -1)
 				chunk.pos = chunk.mins + data.settings.chunk_radius
 				chunk.maxs = chunk.pos + data.settings.chunk_radius
 				post_chunk = chunk.pos.tuple()
-				chunk.frame = self.chunks[post_chunk] if post_chunk in self.chunks else None
+				chunk.frame = self.chunks[thread][post_chunk] if post_chunk in self.chunks[thread] else None
+				if not batch and not post_chunk in ray.traversed:
+					ray.traversed.append(post_chunk)
 
 			if chunk.frame:
 				pos = math.trunc(ray.pos - ray.pos.snapped(data.settings.chunk_size, -1))
@@ -111,9 +113,9 @@ class Camera:
 						pos_x = math.trunc(ray_pos_x - ray_pos_x.snapped(data.settings.chunk_size, -1))
 						pos_y = math.trunc(ray_pos_y - ray_pos_y.snapped(data.settings.chunk_size, -1))
 						pos_z = math.trunc(ray_pos_z - ray_pos_z.snapped(data.settings.chunk_size, -1))
-						chunk_x = chunk.frame if ray_pos_x >= chunk.mins and ray_pos_x <= chunk.maxs else self.chunk_get(ray_pos_x)
-						chunk_y = chunk.frame if ray_pos_y >= chunk.mins and ray_pos_y <= chunk.maxs else self.chunk_get(ray_pos_y)
-						chunk_z = chunk.frame if ray_pos_z >= chunk.mins and ray_pos_z <= chunk.maxs else self.chunk_get(ray_pos_z)
+						chunk_x = chunk.frame if ray_pos_x >= chunk.mins and ray_pos_x <= chunk.maxs else self.chunk_get(thread, ray_pos_x)
+						chunk_y = chunk.frame if ray_pos_y >= chunk.mins and ray_pos_y <= chunk.maxs else self.chunk_get(thread, ray_pos_y)
+						chunk_z = chunk.frame if ray_pos_z >= chunk.mins and ray_pos_z <= chunk.maxs else self.chunk_get(thread, ray_pos_z)
 						mat_x = chunk_x.get_voxel(pos_x) if chunk_x else None
 						mat_y = chunk_y.get_voxel(pos_y) if chunk_y else None
 						mat_z = chunk_z.get_voxel(pos_z) if chunk_z else None
@@ -129,75 +131,41 @@ class Camera:
 			ray.step += step
 			ray.pos += ray.vel * step
 
-		# Run the background function and return the resulting color, fall back to black if a color wasn't set
+		# Run the background function and return the ray data
 		if data.background:
 			data.background(ray, data.settings)
-		return ray.color
+		return ray
 
 	# Called by threads with a tile image to paint to, creates a new surface for this thread to paint to which is returned to the main thread as a byte string
 	# If static noise is enabled, the random seed is set to an index unique to this pixel and sample so noise in ray calculations is static instead of flickering
 	# The batch number decides which group of pixels should be rendered this call using a pattern generated from the 2D position of the pixel
 	def tile(self, image: str, thread: int, batch: int):
 		tile = pg.image.frombytes(image, (data.settings.width, data.settings.tiles), "RGB")
+		traversed = []
 		for x in range(data.settings.width):
 			for y in range(data.settings.tiles):
 				if (x ^ y) % data.settings.batches == batch:
+					colors = []
 					line_y = y + (data.settings.tiles * thread)
 					dir_x = -1 + (x / data.settings.width) * 2
 					dir_y = -1 + (line_y / data.settings.height) * 2
 					detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
-
-					# Apply the average pixel color from each sample, the number of samples is influenced by ray detail
-					colors = []
 					samples = max(1, round(data.settings.samples * detail))
 					for sample in range(samples):
 						if data.settings.static:
 							random.seed((1 + x) * (1 + line_y) * (1 + sample))
-						color = self.trace(dir_x, dir_y, detail)
-						colors.append(color.array())
+
+						ray = self.trace(thread, batch, dir_x, dir_y)
+						colors.append(ray.color.array())
+						for post in ray.traversed:
+							if not post in traversed:
+								traversed.append(post)
+
 					color = average(colors)
 					tile.set_at((x, y), (color[0], color[1], color[2]))
 					random.seed(None)
 
-		return (pg.image.tobytes(tile, "RGB"), thread)
-
-	# Update the position and rotation this camera will shoot rays from followed by chunk frames
-	def update(self, pos: vec3, rot: vec3, time: float):
-		self.pos = pos
-		self.rot = rot
-
-		# Preform updates to chunks, limited by the chunk update rate setting
-		self.timer += time
-		if self.timer >= data.settings.chunk_time:
-			self.timer -= data.settings.chunk_time
-
-			# Scan existing chunks and check if their LOD changed, force recalculation if so
-			for post, frame in self.chunks.items():
-				pos = vec3(post[0], post[1], post[2])
-				if not pos in data.objects_chunks_update and self.chunk_get_lod(pos) != frame.lod:
-					data.objects_chunks_update.append(pos)
-
-			# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
-			for pos_center in data.objects_chunks_update:
-				pos_min = pos_center - data.settings.chunk_radius
-				pos_max = pos_center + data.settings.chunk_radius
-				lod = self.chunk_get_lod(pos_center)
-				voxels = {}
-				for obj in data.objects:
-					if obj.visible and obj.intersects(pos_min, pos_max):
-						spr = obj.get_sprite()
-						for x in range(pos_min.x, pos_max.x, lod):
-							for y in range(pos_min.y, pos_max.y, lod):
-								for z in range(pos_min.z, pos_max.z, lod):
-									pos = vec3(x, y, z)
-									if obj.intersects(pos, pos):
-										mat = spr.get_voxel(None, pos - obj.mins)
-										if mat:
-											pos_chunk = pos - pos_min
-											post_chunk = pos_chunk.tuple()
-											voxels[post_chunk] = mat
-				self.chunk_set(pos_center, voxels, lod)
-			data.objects_chunks_update = []
+		return (pg.image.tobytes(tile, "RGB"), traversed, thread)
 
 # Window: Initializes Pygame and starts the main loop, handles all updates and redraws the canvas using a Camera instance
 class Window:
@@ -213,17 +181,21 @@ class Window:
 		self.clock = pg.time.Clock()
 		self.pool = mp.Pool(processes = data.settings.threads)
 		self.cam = Camera()
+		self.chunks = {}
+		self.timer = 0
 		self.mouselook = True
 		self.running = True
 
-		# Prepare the containers for tiles and batches, each tile stores an image slot per thread which is cleared after being drawn
+		# Prepare the containers for tiles batches and traversed chunks, each item is indexed by the thread number
 		self.tiles = []
 		self.batches = []
+		self.traversed = []
 		for t in range(data.settings.threads):
 			surface = pg.Surface((data.settings.width, data.settings.tiles), pg.HWSURFACE)
 			image = pg.image.tobytes(surface, "RGB")
 			self.tiles.append(image)
 			self.batches.append(0)
+			self.traversed.append([])
 
 		# Main loop, limited by FPS with a slower clock when the window isn't focused
 		while self.running:
@@ -237,8 +209,9 @@ class Window:
 
 	# Called by the thread pool on finish, adds the image to the appropriate thread for the main thread to mix
 	def draw_tile(self, result):
-		image, thread = result
+		image, traversed, thread = result
 		self.tiles[thread] = image
+		self.traversed[thread] = traversed or self.traversed[thread]
 		self.batches[thread] = (self.batches[thread] + 1) % data.settings.batches
 
 	# Request the camera to draw a new tile for each thread
@@ -324,6 +297,57 @@ class Window:
 		if keys[pg.K_RIGHT]:
 			obj_cam.rotate(vec3(0, 0, +5) * units, data.settings.max_pitch)
 
+	# Get the LOD level of a chunk based on its distance to the camera position
+	def chunk_lod(self, pos: vec3):
+		if data.settings.chunk_lod > 1:
+			lod = pos.distance(self.cam.pos) / (data.settings.dist_max / data.settings.chunk_lod)
+			return min(1 + math.trunc(lod), data.settings.chunk_lod)
+		return 1
+
+	# Create a new frame with this voxel list or delete the chunk if empty
+	def chunk_set(self, pos: vec3, voxels: dict, lod: int):
+		post = pos.tuple()
+		if voxels:
+			self.chunks[post] = data.Frame(packed = True, lod = lod)
+			self.chunks[post].set_voxels(voxels)
+		elif post in self.chunks:
+			del self.chunks[post]
+
+	# Compile a new list of chunks to be used by the renderer, chunks are only recalculated based on the update timer
+	def chunk_update(self, time: float):
+		self.timer += time
+		if self.timer >= data.settings.chunk_time:
+			self.timer -= data.settings.chunk_time
+
+			# Scan existing chunks and check if their LOD changed, force recalculation if so
+			for post, frame in self.chunks.items():
+				pos = vec3(post[0], post[1], post[2])
+				if not pos in data.objects_chunks_update and self.chunk_lod(pos) != frame.lod:
+					data.objects_chunks_update.append(pos)
+
+			# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
+			for pos_center in data.objects_chunks_update:
+				pos_min = pos_center - data.settings.chunk_radius
+				pos_max = pos_center + data.settings.chunk_radius
+				lod = self.chunk_lod(pos_center)
+				voxels = {}
+				for obj in data.objects:
+					if obj.visible and obj.intersects(pos_min, pos_max):
+						spr = obj.get_sprite()
+						for x in range(pos_min.x, pos_max.x, lod):
+							for y in range(pos_min.y, pos_max.y, lod):
+								for z in range(pos_min.z, pos_max.z, lod):
+									pos = vec3(x, y, z)
+									if obj.intersects(pos, pos):
+										mat = spr.get_voxel(None, pos - obj.mins)
+										if mat:
+											pos_chunk = pos - pos_min
+											post_chunk = pos_chunk.tuple()
+											voxels[post_chunk] = mat
+				self.chunk_set(pos_center, voxels, lod)
+			data.objects_chunks_update = []
+		self.cam.chunk_assign(self.chunks, self.traversed)
+
 	# Main loop of the Pygame window, trigger draw calls apply input and execute the update function of objects in the scene
 	def update(self):
 		obj_cam = None
@@ -341,7 +365,9 @@ class Window:
 		d = obj_cam.rot.dir(False)
 		time = self.clock.get_time() / 1000
 		self.input(obj_cam, time)
-		self.cam.update(obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z), obj_cam.rot, time)
+		self.cam.pos = obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z)
+		self.cam.rot = obj_cam.rot
+		self.chunk_update(time)
 		self.draw()
 		pg.display.update()
 		pg.mouse.set_visible(not self.mouselook)
