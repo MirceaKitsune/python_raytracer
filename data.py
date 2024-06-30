@@ -14,11 +14,11 @@ mod = sys.argv[1].strip() if len(sys.argv) > 1 else "default"
 cfg = configparser.RawConfigParser()
 cfg.read("mods/" + mod + "/config.cfg")
 settings = store(
-	width = cfg.getint("WINDOW", "width") or 96,
+	width = cfg.getint("WINDOW", "width") or 64,
 	height = cfg.getint("WINDOW", "height") or 64,
-	scale = cfg.getint("WINDOW", "scale") or 8,
+	scale = cfg.getint("WINDOW", "scale") or 1,
 	smooth = cfg.getboolean("WINDOW", "smooth") or False,
-	fps = cfg.getint("WINDOW", "fps") or 24,
+	fps = cfg.getint("WINDOW", "fps") or 0,
 
 	sync = cfg.getboolean("RENDER", "sync") or False,
 	static = cfg.getboolean("RENDER", "static") or False,
@@ -31,10 +31,11 @@ settings = store(
 	dof = cfg.getfloat("RENDER", "dof") or 0,
 	batches = cfg.getint("RENDER", "batches") or 1,
 	dist_min = cfg.getint("RENDER", "dist_min") or 0,
-	dist_max = cfg.getint("RENDER", "dist_max") or 48,
+	dist_max = cfg.getint("RENDER", "dist_max") or 32,
 	max_light = cfg.getint("RENDER", "max_light") or 0,
 	max_bounces = cfg.getint("RENDER", "max_bounces") or 0,
 	lod_bounces = cfg.getfloat("RENDER", "lod_bounces") or 0,
+	lod_samples = cfg.getfloat("RENDER", "lod_samples") or 0,
 	lod_edge = cfg.getfloat("RENDER", "lod_edge") or 0,
 	threads = cfg.getint("RENDER", "threads") or mp.cpu_count(),
 
@@ -61,7 +62,7 @@ background = None
 # Material: A subset of Frame, used to store the physical properties of a virtual atom
 class Material:
 	def __init__(self, **settings):
-		self.function = "function" in settings and settings["function"] or None
+		self.function = settings["function"] if  "function" in settings else None
 		for s in settings:
 			setattr(self, s, settings[s])
 
@@ -195,7 +196,7 @@ class Sprite:
 		# Sprite size needs to be an even number as to not break object calculations, voxels are located at integer positions and checking voxel position from object center would result in 0.5
 		self.size = settings["size"] if "size" in settings else vec3(0, 0, 0)
 		self.lod = settings["lod"] if "lod" in settings else 1
-		if self.size.x % 2 != 0 or self.size.y % 2 != 0 or self.size.z % 2 != 0:
+		if self.size.x % 2 or self.size.y % 2 or self.size.z % 2:
 			print("Warning: Sprite size " + str(self.size) + " contains a float or odd number in one or more directions, affected axes will be rounded and enlarged by one unit.")
 			self.size.x = math.trunc(self.size.x) + 1 if math.trunc(self.size.x) % 2 != 0 else math.trunc(self.size.x)
 			self.size.y = math.trunc(self.size.y) + 1 if math.trunc(self.size.y) % 2 != 0 else math.trunc(self.size.y)
@@ -346,6 +347,7 @@ class Object:
 		self.rot = settings["rot"] if "rot" in settings else vec3(0, 0, 0)
 		self.vel = settings["vel"] if "vel" in settings else vec3(0, 0, 0)
 		self.physics = settings["physics"] if "physics" in settings else False
+		self.function = settings["function"] if  "function" in settings else None
 
 		self.visible = False
 		self.size = self.mins = self.maxs = vec3(0, 0, 0)
@@ -486,6 +488,8 @@ class Object:
 				self.area_update()
 			if self.physics:
 				self.update_physics()
+			if self.function:
+				self.function(self)
 
 	# Set a sprite as the active sprite, None removes the sprite from this object and disables it
 	# If more than one sprite is provided, store up 4 sprites representing object angles

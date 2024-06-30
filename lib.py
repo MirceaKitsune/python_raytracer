@@ -341,7 +341,7 @@ def average(items):
 
 # Random: Returns a random number with an amplitude, eg: 1 can be anything between -1 and +1
 def rand(amp: float):
-	if amp == 0:
+	if not amp:
 		return 0
 	return (-1 + random.random() * 2) * amp
 
@@ -362,10 +362,12 @@ def material(ray, mat, settings):
 	absorption = mat.absorption / ((1 + ray.bounces) ** (1 + settings.falloff))
 
 	# Color, energy: Translate the material's albedo and emission to ray color and energy, based on the ray's color absorption
+	# Life: Scale ray life with roughness, the rougher a material is the less future bounces will provide any noticeable detail
 	# Roughness: Velocity is randomized by the roughness value of the interaction, 0 is perfectly sharp while 1 can send the ray in almost any direction
 	# Bounces: Return the material absorption as the bounce amount, glass and fog have a lower probability of terminating rays sooner
 	ray.color = ray.color.mix(mat.albedo, absorption)
 	ray.energy = mix(ray.energy, mat.energy, absorption)
+	ray.life *= 1 - mat.roughness
 	ray.vel += vec3(rand(mat.roughness), rand(mat.roughness), rand(mat.roughness))
 	return mat.absorption
 

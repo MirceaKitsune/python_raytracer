@@ -39,11 +39,11 @@ class Camera:
 
 	# Trace the pixel based on the given 2D direction which is used to calculate ray velocity from lens distorsion: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
 	# Returns the ray data after processing is over, the result represents the ray state during the last step it has preformed
-	def trace(self, thread: int, batch: int, dir_x: float, dir_y: float):
+	def trace(self, thread: int, batch: int, sample: int, dir_x: float, dir_y: float):
 		# Randomly offset the ray's angle based on the DOF setting, fetch its direction and use it as the ray velocity
 		# Velocity must be normalized as voxels need to be checked at all integer positions, the speed of light is always 1
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
-		detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
+		detail = (1 - abs(dir_x * dir_y) * data.settings.lod_edge) / (1 + sample * data.settings.lod_samples)
 		lens_x = (dir_x / data.settings.proportions) * self.lens + rand(data.settings.dof)
 		lens_y = (dir_y * data.settings.proportions) * self.lens + rand(data.settings.dof)
 		ray_rot = self.rot.rotate(vec3(0, -lens_y, +lens_x))
@@ -73,7 +73,7 @@ class Camera:
 		# Chunk data is calculated first to reflect the chunk the ray is currently in, the active chunk is changed when the ray enters the area of another chunk
 		# If a material is found, its function is called which can modify any of the ray properties, performance optimizations may terminate the ray sooner
 		# Note that diagonal steps are allowed and the ray can penetrate 1 voxel thick corners, checking in a stair pattern isn't supported due to performance
-		# The ray also returns the positions of chunks it traveled through, for best balance between accuracy and performance this is only calculated for the first batch
+		# The ray also returns the positions of chunks it traveled through, for best balance between accuracy and performance this is only calculated for the first batch and sample
 		while ray.step < ray.life:
 			if ray.pos.x < chunk.mins.x or ray.pos.y < chunk.mins.y or ray.pos.z < chunk.mins.z or ray.pos.x > chunk.maxs.x or ray.pos.y > chunk.maxs.y or ray.pos.z > chunk.maxs.z:
 				chunk.mins = ray.pos.snapped(data.settings.chunk_size, -1)
@@ -81,7 +81,7 @@ class Camera:
 				chunk.maxs = chunk.pos + data.settings.chunk_radius
 				post_chunk = chunk.pos.tuple()
 				chunk.frame = self.chunks[thread][post_chunk] if post_chunk in self.chunks[thread] else None
-				if not batch and not post_chunk in ray.traversed:
+				if not batch and not sample and not post_chunk in ray.traversed:
 					ray.traversed.append(post_chunk)
 
 			if chunk.frame:
@@ -126,8 +126,8 @@ class Camera:
 						if not (mat_z and mat_z.ior == mat.ior):
 							ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
 
-			# Advance the ray, move by frame LOD if inside a valid chunk or skip toward the safest possible distance to the nearest chunk if void
-			step = chunk.frame.lod if chunk.frame else max(1, data.settings.chunk_radius - ray.pos.distance(chunk.pos))
+			# Advance the ray, move by frame LOD if inside a valid chunk or 1 unit if void
+			step = chunk.frame.lod if chunk.frame else 1
 			ray.step += step
 			ray.pos += ray.vel * step
 
@@ -155,7 +155,7 @@ class Camera:
 						if data.settings.static:
 							random.seed((1 + x) * (1 + line_y) * (1 + sample))
 
-						ray = self.trace(thread, batch, dir_x, dir_y)
+						ray = self.trace(thread, batch, sample, dir_x, dir_y)
 						colors.append(ray.color.array())
 						for post in ray.traversed:
 							if not post in traversed:
@@ -197,10 +197,9 @@ class Window:
 			self.batches.append(0)
 			self.traversed.append([])
 
-		# Main loop, limited by FPS with a slower clock when the window isn't focused
+		# Main loop limited by FPS
 		while self.running:
-			fps = data.settings.fps if pg.mouse.get_focused() else math.trunc(data.settings.fps / 5)
-			self.clock.tick(fps)
+			self.clock.tick(data.settings.fps)
 			self.update()
 			if not self.running:
 				self.pool.close()
@@ -224,27 +223,31 @@ class Window:
 
 		# Add available tiles to the canvas with performance information on top
 		tiles = []
+		rects = []
 		for t in range(len(self.tiles)):
 			if self.tiles[t]:
 				tile = pg.image.frombytes(self.tiles[t], (data.settings.width, data.settings.tiles), "RGB")
-				tiles.append((tile, (0, t * data.settings.tiles)))
+				rect = (0, t * data.settings.tiles, data.settings.width, data.settings.tiles)
+				tiles.append((tile, (rect[0], rect[1])))
+				rects.append((rect[0] * data.settings.scale, rect[1] * data.settings.scale, rect[2] * data.settings.scale, rect[3] * data.settings.scale))
 				self.pool.apply_async(self.cam.tile, args = (self.tiles[t], t, self.batches[t]), callback = self.draw_tile)
 				self.tiles[t] = None
-		if tiles:
+		if tiles and rects:
 			self.canvas.blits(tiles)
 			canvas = pg.transform.smoothscale(self.canvas, self.rect_win.tuple()) if data.settings.smooth else pg.transform.scale(self.canvas, self.rect_win.tuple())
 			text_info = str(data.settings.width) + " x " + str(data.settings.height) + " (" + str(data.settings.width * data.settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(data.settings.fps) + " FPS"
 			text = self.font.render(text_info, True, (255, 255, 255))
 			self.screen.blit(canvas, (0, 0))
 			self.screen.blit(text, (0, 0))
+			pg.display.update(rects)
 
 	# Handle keyboard and mouse input, apply object movement for the camera controlled object
 	def input(self, obj_cam: data.Object, time: float):
 		keys = pg.key.get_pressed()
 		mods = pg.key.get_mods()
-		units = time * data.settings.speed_move
-		units_jump = time * data.settings.speed_jump
-		units_mouse = time * data.settings.speed_mouse
+		units = data.settings.speed_move * time
+		units_jump = data.settings.speed_jump / (1 + time)
+		units_mouse = data.settings.speed_mouse / (1 + time * 1000)
 		d = obj_cam.rot.dir(False)
 		dh = vec3(1, 0, 1) if data.settings.max_pitch else vec3(1, 1, 1)
 		dv = vec3(0, 1, 0) if data.settings.max_pitch else vec3(1, 1, 1)
@@ -317,7 +320,7 @@ class Window:
 	def chunk_update(self, time: float):
 		self.timer += time
 		if self.timer >= data.settings.chunk_time:
-			self.timer -= data.settings.chunk_time
+			self.timer -= max(data.settings.chunk_time, time)
 
 			# Scan existing chunks and check if their LOD changed, force recalculation if so
 			for post, frame in self.chunks.items():
@@ -348,7 +351,7 @@ class Window:
 			data.objects_chunks_update = []
 		self.cam.chunk_assign(self.chunks, self.traversed)
 
-	# Main loop of the Pygame window, trigger draw calls apply input and execute the update function of objects in the scene
+	# Main loop of the Pygame window, apply input then execute the update functions of objects in the scene and request redrawing when the window is focused
 	def update(self):
 		obj_cam = None
 		for obj_cam in data.objects:
@@ -359,18 +362,18 @@ class Window:
 			self.running = False
 			return
 
+		time = self.clock.get_time() / 1000
+		self.input(obj_cam, time)
 		for obj in data.objects:
 			obj.update(self.cam.pos)
 
-		d = obj_cam.rot.dir(False)
-		time = self.clock.get_time() / 1000
-		self.input(obj_cam, time)
-		self.cam.pos = obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z)
-		self.cam.rot = obj_cam.rot
-		self.chunk_update(time)
-		self.draw()
-		pg.display.update()
-		pg.mouse.set_visible(not self.mouselook)
+		if pg.mouse.get_focused():
+			d = obj_cam.rot.dir(False)
+			self.cam.pos = obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z)
+			self.cam.rot = obj_cam.rot
+			self.chunk_update(time)
+			self.draw()
+			pg.mouse.set_visible(not self.mouselook)
 
 # Create the main window and start Pygame
 Window()
