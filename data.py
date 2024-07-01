@@ -21,8 +21,15 @@ settings = store(
 	fps = cfg.getint("WINDOW", "fps") or 0,
 
 	sync = cfg.getboolean("RENDER", "sync") or False,
+	culling = cfg.getboolean("RENDER", "culling") or False,
 	static = cfg.getboolean("RENDER", "static") or False,
 	samples = cfg.getint("RENDER", "samples") or 1,
+	shutter = cfg.getfloat("RENDER", "shutter") or 0,
+	spill = cfg.getfloat("RENDER", "spill") or 0,
+	iris = cfg.getfloat("RENDER", "iris") or 0,
+	iris_time = cfg.getfloat("RENDER", "iris_time") or 0,
+	bloom = cfg.getfloat("RENDER", "bloom") or 0,
+	bloom_blur = cfg.getfloat("RENDER", "bloom_blur") or 0,
 	fov = cfg.getfloat("RENDER", "fov") or 90,
 	falloff = cfg.getfloat("RENDER", "falloff") or 0,
 	chunk_rate = cfg.getint("RENDER", "chunk_rate") or 0,
@@ -56,12 +63,11 @@ settings.chunk_radius = round(settings.chunk_size / 2)
 # Obtain the number of tiles and store their bounding boxes as (x_min, y_min, x_max, y_max)
 tile_x, tile_y = grid(settings.threads)
 tile_x, tile_y = (tile_x, tile_y) if settings.width > settings.height else (tile_y, tile_x)
-settings.tile_width = math.trunc(settings.width / tile_x)
-settings.tile_height = math.trunc(settings.height / tile_y)
+settings.tile_size = math.trunc(settings.width // tile_x), math.trunc(settings.height // tile_y)
 settings.tile = []
 for x in range(tile_x):
 	for y in range(tile_y):
-		settings.tile.append((x * settings.tile_width, y * settings.tile_height, x * settings.tile_width + settings.tile_width, y * settings.tile_height + settings.tile_height))
+		settings.tile.append((x * settings.tile_size[0], y * settings.tile_size[1], x * settings.tile_size[0] + settings.tile_size[0], y * settings.tile_size[1] + settings.tile_size[1]))
 
 # Variables for global instances such as objects and chunk updates, accessed by the window and camera
 objects = []

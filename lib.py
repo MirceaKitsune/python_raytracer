@@ -78,28 +78,28 @@ class vec2:
 			return self.x >= other and self.y >= other
 
 	def __neg__(self):
-		return vec3(-self.x, -self.y)
+		return vec2(-self.x, -self.y)
 
 	def __pos__(self):
-		return vec3(+self.x, +self.y)
+		return vec2(+self.x, +self.y)
 
 	def __invert__(self):
-		return vec3(~self.x, ~self.y)
+		return vec2(~self.x, ~self.y)
 
 	def __abs__(self):
-		return vec3(abs(self.x), abs(self.y))
+		return vec2(abs(self.x), abs(self.y))
 
 	def __round__(self):
-		return vec3(round(self.x), round(self.y))
+		return vec2(round(self.x), round(self.y))
 
 	def __trunc__(self):
-		return vec3(math.trunc(self.x), math.trunc(self.y))
+		return vec2(math.trunc(self.x), math.trunc(self.y))
 
 	def __floor__(self):
-		return vec3(math.floor(self.x), math.floor(self.y))
+		return vec2(math.floor(self.x), math.floor(self.y))
 
 	def __ceil__(self):
-		return vec3(math.ceil(self.x), math.ceil(self.y))
+		return vec2(math.ceil(self.x), math.ceil(self.y))
 
 	def __str__(self):
 		return str(self.x) + "," + str(self.y)
@@ -332,6 +332,21 @@ def grid(unit: int):
 	for i in range(math.trunc(math.sqrt(unit)), 0, -1):
 		if not unit % i:
 			return unit // i, i
+
+# Combine two lists while excluding duplicate items
+def merge(items: list, items_new: list):
+	result = list(items)
+	for item in items_new:
+		if not item in result:
+			result.append(item)
+	return result
+
+# Unpack a list of containers into a single item
+def unpack(items: list):
+	result = []
+	for item in items:
+		result += item
+	return result
 
 # Returns the average result from a list of equal length
 def average(items):

@@ -55,20 +55,20 @@ mat_rough_white = data.Material(
 	elasticity = 0.5,
 )
 
-mat_translucent = data.Material(
+mat_light_gold = data.Material(
 	function = material,
-	albedo = rgb(0, 255, 255),
+	albedo = rgb(255, 255, 0),
 	roughness = 0,
-	absorption = 0.25,
-	ior = 0.25,
-	energy = 0,
+	absorption = 1,
+	ior = 1,
+	energy = 2.5,
 	solidity = 1,
 	weight = 0,
-	friction = 0,
-	elasticity = 0,
+	friction = 0.25,
+	elasticity = 0.5,
 )
 
-mat_light = data.Material(
+mat_light_pink = data.Material(
 	function = material,
 	albedo = rgb(255, 0, 255),
 	roughness = 0,
@@ -81,12 +81,26 @@ mat_light = data.Material(
 	elasticity = 0.5,
 )
 
+mat_glass_cyan = data.Material(
+	function = material,
+	albedo = rgb(0, 255, 255),
+	roughness = 0,
+	absorption = 0.25,
+	ior = 0.25,
+	energy = 0,
+	solidity = 1,
+	weight = 0,
+	friction = 0,
+	elasticity = 0,
+)
+
 spr = data.Sprite(size = vec3(64, 64, 64), frames = 1, lod = 1)
 spr.set_voxels_area(0, vec3(0, 0, 0), vec3(63, 63, 0), mat_opaque_red)
 spr.set_voxels_area(0, vec3(0, 0, 0), vec3(0, 63, 63), mat_opaque_green)
 spr.set_voxels_area(0, vec3(0, 0, 0), vec3(63, 0, 63), mat_opaque_blue)
-spr.set_voxels_area(0, vec3(9, 1, 3), vec3(13, 5, 7), mat_translucent)
-spr.set_voxels_area(0, vec3(3, 1, 9), vec3(7, 5, 13), mat_light)
+spr.set_voxels_area(0, vec3(9, 1, 3), vec3(13, 5, 7), mat_light_gold)
+spr.set_voxels_area(0, vec3(3, 1, 9), vec3(7, 5, 13), mat_light_pink)
+spr.set_voxels_area(0, vec3(9, 1, 9), vec3(13, 5, 13), mat_glass_cyan)
 obj = data.Object(pos = vec3(0, 0, 0), rot = vec3(0, 0, 0), vel = vec3(0, 0, 0), physics = False)
 obj.set_sprite(spr)
 
