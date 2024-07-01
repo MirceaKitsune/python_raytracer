@@ -140,20 +140,20 @@ class Camera:
 	# If static noise is enabled, the random seed is set to an index unique to this pixel and sample so noise in ray calculations is static instead of flickering
 	# The batch number decides which group of pixels should be rendered this call using a pattern generated from the 2D position of the pixel
 	def tile(self, image: str, thread: int, batch: int):
-		tile = pg.image.frombytes(image, (data.settings.width, data.settings.tiles), "RGB")
+		tile = pg.image.frombytes(image, (data.settings.tile_width, data.settings.tile_height), "RGB")
 		traversed = []
-		for x in range(data.settings.width):
-			for y in range(data.settings.tiles):
+		box = data.settings.tile[thread]
+		for x in range(box[0], box[2]):
+			for y in range(box[1], box[3]):
 				if (x ^ y) % data.settings.batches == batch:
 					colors = []
-					line_y = y + (data.settings.tiles * thread)
 					dir_x = -1 + (x / data.settings.width) * 2
-					dir_y = -1 + (line_y / data.settings.height) * 2
+					dir_y = -1 + (y / data.settings.height) * 2
 					detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
 					samples = max(1, round(data.settings.samples * detail))
 					for sample in range(samples):
 						if data.settings.static:
-							random.seed((1 + x) * (1 + line_y) * (1 + sample))
+							random.seed((1 + x) * (1 + y) * (1 + sample))
 
 						ray = self.trace(thread, batch, sample, dir_x, dir_y)
 						colors.append(ray.color.array())
@@ -162,10 +162,10 @@ class Camera:
 								traversed.append(post)
 
 					color = average(colors)
-					tile.set_at((x, y), (color[0], color[1], color[2]))
+					tile.set_at((x - box[0], y - box[1]), (color[0], color[1], color[2]))
 					random.seed(None)
 
-		return (pg.image.tobytes(tile, "RGB"), traversed, thread)
+		return pg.image.tobytes(tile, "RGB"), traversed, thread
 
 # Window: Initializes Pygame and starts the main loop, handles all updates and redraws the canvas using a Camera instance
 class Window:
@@ -191,7 +191,7 @@ class Window:
 		self.batches = []
 		self.traversed = []
 		for t in range(data.settings.threads):
-			surface = pg.Surface((data.settings.width, data.settings.tiles), pg.HWSURFACE)
+			surface = pg.Surface((data.settings.tile_width, data.settings.tile_height), pg.HWSURFACE)
 			image = pg.image.tobytes(surface, "RGB")
 			self.tiles.append(image)
 			self.batches.append(0)
@@ -226,10 +226,10 @@ class Window:
 		rects = []
 		for t in range(len(self.tiles)):
 			if self.tiles[t]:
-				tile = pg.image.frombytes(self.tiles[t], (data.settings.width, data.settings.tiles), "RGB")
-				rect = (0, t * data.settings.tiles, data.settings.width, data.settings.tiles)
-				tiles.append((tile, (rect[0], rect[1])))
-				rects.append((rect[0] * data.settings.scale, rect[1] * data.settings.scale, rect[2] * data.settings.scale, rect[3] * data.settings.scale))
+				box = data.settings.tile[t]
+				tile = pg.image.frombytes(self.tiles[t], (data.settings.tile_width, data.settings.tile_height), "RGB")
+				tiles.append((tile, (box[0], box[1])))
+				rects.append((box[0] * data.settings.scale, box[1] * data.settings.scale, data.settings.tile_width * data.settings.scale, data.settings.tile_height * data.settings.scale))
 				self.pool.apply_async(self.cam.tile, args = (self.tiles[t], t, self.batches[t]), callback = self.draw_tile)
 				self.tiles[t] = None
 		if tiles and rects:

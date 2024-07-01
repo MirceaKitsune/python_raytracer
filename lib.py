@@ -327,6 +327,12 @@ class rgb:
 		bias2 = 1 - bias1
 		return rgb(round(self.r * bias2 + col.r * bias1), round(self.g * bias2 + col.g * bias1), round(self.b * bias2 + col.b * bias1))
 
+# Returns the width and height of the most even 2D grid possible for the integer provided
+def grid(unit: int):
+	for i in range(math.trunc(math.sqrt(unit)), 0, -1):
+		if not unit % i:
+			return unit // i, i
+
 # Returns the average result from a list of equal length
 def average(items):
 	if len(items[0]) <= 1:

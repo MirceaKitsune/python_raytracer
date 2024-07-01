@@ -50,9 +50,18 @@ settings = store(
 	dist_move = cfg.getint("PHYSICS", "dist_move") or 0,
 )
 settings.proportions = ((settings.width + settings.height) / 2) / max(settings.width, settings.height)
-settings.tiles = math.ceil(settings.height / settings.threads)
 settings.chunk_time = settings.chunk_rate / 1000
 settings.chunk_radius = round(settings.chunk_size / 2)
+
+# Obtain the number of tiles and store their bounding boxes as (x_min, y_min, x_max, y_max)
+tile_x, tile_y = grid(settings.threads)
+tile_x, tile_y = (tile_x, tile_y) if settings.width > settings.height else (tile_y, tile_x)
+settings.tile_width = math.trunc(settings.width / tile_x)
+settings.tile_height = math.trunc(settings.height / tile_y)
+settings.tile = []
+for x in range(tile_x):
+	for y in range(tile_y):
+		settings.tile.append((x * settings.tile_width, y * settings.tile_height, x * settings.tile_width + settings.tile_width, y * settings.tile_height + settings.tile_height))
 
 # Variables for global instances such as objects and chunk updates, accessed by the window and camera
 objects = []

@@ -60,7 +60,7 @@ Settings are stored within the mod's `config.cfg` file and can be used to modify
     - `lod_bounces`: Rays terminate faster with each bounce. 0 disables this optimization, at 1 each opaque bounce will half the life of a ray.
     - `lod_samples`: Subsequent samples have a shorter life. At 1 each sample has half the lifetime of the previous one. Boosts performance but may cause reflections and distant objects to fade sooner as well as induce color banding.
     - `lod_edge`: Rays closer to the edge of the canvas start with a lower lifetime and will render fewer samples. Performance is improved by focusing more detail toward the center, at the cost of some detail loss near the edges. Stacks with other performance optimizations that rely on ray life such as `lod_bounces`.
-    - `threads`: The number of threads to use for ray tracing by the thread pool, 0 will use all CPU cores. The screen is divided in vertical chunks so that each thread processes and draws a different area of the canvas, ensure `height` is larger than and equally divisible by the thread count.
+    - `threads`: The number of threads to use for ray tracing by the thread pool, 0 uses all CPU cores. The screen is evenly divided into boxes totaling this amount so that each thread processes a different portion of the canvas. Ensure `width` and `height` are equally divisible to the resulting grid or borders may be appear near the screen edges.
 
 ## Default material settings
 
