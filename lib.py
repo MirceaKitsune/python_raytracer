@@ -290,9 +290,9 @@ class vec3:
 	def dir(self, normalize: bool):
 		rad_y = math.radians(self.y)
 		rad_z = math.radians(self.z)
-		dir_x = math.sin(rad_z) * math.cos(rad_y) if normalize else math.sin(rad_z)
-		dir_y = math.sin(rad_y)
-		dir_z = math.cos(rad_z) * math.cos(rad_y) if normalize else math.cos(rad_z)
+		dir_x = math.sin(rad_y) * math.cos(rad_z) if normalize else math.sin(rad_y)
+		dir_y = math.sin(rad_z)
+		dir_z = math.cos(rad_y) * math.cos(rad_z) if normalize else math.cos(rad_y)
 		return vec3(dir_x, dir_y, dir_z)
 
 	def normalize(self):
@@ -329,7 +329,7 @@ class rgb:
 
 # Returns the width and height of the most even 2D grid possible for the integer provided
 def grid(unit: int):
-	for i in range(math.trunc(math.sqrt(unit)), 0, -1):
+	for i in range(math.isqrt(unit), 0, -1):
 		if not unit % i:
 			return unit // i, i
 

@@ -39,8 +39,10 @@ class Camera:
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
 		lens_x = (dir_x / data.settings.proportions) * self.lens + rand(data.settings.dof)
 		lens_y = (dir_y * data.settings.proportions) * self.lens + rand(data.settings.dof)
-		ray_rot = self.rot.rotate(vec3(0, -lens_y, +lens_x))
+		ray_rot = self.rot.rotate(vec3(0, -lens_x, -lens_y))
 		ray_dir = ray_rot.dir(True).normalize()
+		chunk_pos = chunk_min = chunk_max = vec3(0, 0, 0)
+		chunk = None
 
 		# Ray data is kept in a data store so it can be easily delivered to material functions and support custom properties
 		ray = store(
@@ -54,44 +56,32 @@ class Camera:
 			traversed = [],
 		)
 
-		# Chunk data relevant to this ray, updated at the beginning of the ray processing cycle
-		chunk = store(
-			pos = vec3(0, 0, 0),
-			mins = vec3(0, 0, 0),
-			maxs = vec3(0, 0, 0),
-			frame = None,
-		)
-
 		# Each step the ray advances through space by adding the velocity to its position, starting from the minimum distance and going until its lifetime runs out or it's stopped earlier
 		# Chunk data is calculated first to reflect the chunk the ray is currently in, the active chunk is changed when the ray enters the area of another chunk
 		# If a material is found, its function is called which can modify any of the ray properties, performance optimizations may terminate the ray sooner
 		# Note that diagonal steps are allowed and the ray can penetrate 1 voxel thick corners, checking in a stair pattern isn't supported due to performance
 		# The ray also returns the positions of chunks it traveled through which is used for occlusion culling
 		while ray.step < ray.life:
-			if ray.pos.x < chunk.mins.x or ray.pos.y < chunk.mins.y or ray.pos.z < chunk.mins.z or ray.pos.x > chunk.maxs.x or ray.pos.y > chunk.maxs.y or ray.pos.z > chunk.maxs.z:
-				chunk.mins = ray.pos.snapped(data.settings.chunk_size, -1)
-				chunk.pos = chunk.mins + data.settings.chunk_radius
-				chunk.maxs = chunk.pos + data.settings.chunk_radius
-				post_chunk = chunk.pos.tuple()
-				chunk.frame = self.chunks[post_chunk] if post_chunk in self.chunks else None
+			if not ray.pos >= chunk_min or not ray.pos <= chunk_max:
+				chunk_min = ray.pos.snapped(data.settings.chunk_size, -1)
+				chunk_pos = chunk_min + data.settings.chunk_radius
+				chunk_max = chunk_pos + data.settings.chunk_radius
+				post_chunk = chunk_pos.tuple()
+				chunk = self.chunks[post_chunk] if post_chunk in self.chunks else None
 				if not post_chunk in ray.traversed:
 					ray.traversed.append(post_chunk)
 
-			if chunk.frame:
+			if chunk:
 				pos = math.trunc(ray.pos - ray.pos.snapped(data.settings.chunk_size, -1))
-				mat = chunk.frame.get_voxel(pos)
+				mat = chunk.get_voxel(pos)
 				if mat:
 					# Call the material function and obtain the bounce amount, add it to the total number of bounces
 					# Normalize ray velocity after any changes to ensure the speed of light remains 1 and voxels aren't skipped or calculated twice
 					bounce = mat.function(ray, mat, data.settings)
-					ray.life /= 1 + bounce * data.settings.lod_bounces
 					ray.bounces += bounce
+					ray.life /= 1 + bounce * data.settings.lod_bounces
 					ray.vel = ray.vel.normalize()
-
-					# Enforce maximum ray properties and terminate the trace earlier to improve performance
-					if ray.bounces >= data.settings.max_bounces + 1:
-						break
-					elif ray.energy >= data.settings.max_light:
+					if ray.step >= ray.life or ray.energy >= data.settings.max_light or ray.bounces >= data.settings.max_bounces + 1:
 						break
 
 					# Reflect the velocity of the ray based on material IOR and the neighbors of this voxel which are used to determine face normals
@@ -100,27 +90,27 @@ class Camera:
 					# As neighboring voxels may be located in other chunks, try the local chunk first and fetch from another chunk if not found
 					if mat.ior:
 						direction = (mat.ior - 0.5) * 2
-						ray_pos_x = ray.pos + vec3(1, 0, 0) if ray.vel.x * direction < 0 else ray.pos - vec3(1, 0, 0)
-						ray_pos_y = ray.pos + vec3(0, 1, 0) if ray.vel.y * direction < 0 else ray.pos - vec3(0, 1, 0)
-						ray_pos_z = ray.pos + vec3(0, 0, 1) if ray.vel.z * direction < 0 else ray.pos - vec3(0, 0, 1)
+						ray_pos_x = ray.pos + vec3(1, 0, 0) if ray.vel.x < direction else ray.pos - vec3(1, 0, 0)
+						ray_pos_y = ray.pos + vec3(0, 1, 0) if ray.vel.y < direction else ray.pos - vec3(0, 1, 0)
+						ray_pos_z = ray.pos + vec3(0, 0, 1) if ray.vel.z < direction else ray.pos - vec3(0, 0, 1)
 						pos_x = math.trunc(ray_pos_x - ray_pos_x.snapped(data.settings.chunk_size, -1))
 						pos_y = math.trunc(ray_pos_y - ray_pos_y.snapped(data.settings.chunk_size, -1))
 						pos_z = math.trunc(ray_pos_z - ray_pos_z.snapped(data.settings.chunk_size, -1))
-						chunk_x = chunk.frame if ray_pos_x >= chunk.mins and ray_pos_x <= chunk.maxs else self.chunk_get(ray_pos_x)
-						chunk_y = chunk.frame if ray_pos_y >= chunk.mins and ray_pos_y <= chunk.maxs else self.chunk_get(ray_pos_y)
-						chunk_z = chunk.frame if ray_pos_z >= chunk.mins and ray_pos_z <= chunk.maxs else self.chunk_get(ray_pos_z)
+						chunk_x = chunk if ray_pos_x >= chunk_min and ray_pos_x <= chunk_max else self.chunk_get(ray_pos_x)
+						chunk_y = chunk if ray_pos_y >= chunk_min and ray_pos_y <= chunk_max else self.chunk_get(ray_pos_y)
+						chunk_z = chunk if ray_pos_z >= chunk_min and ray_pos_z <= chunk_max else self.chunk_get(ray_pos_z)
 						mat_x = chunk_x.get_voxel(pos_x) if chunk_x else None
 						mat_y = chunk_y.get_voxel(pos_y) if chunk_y else None
 						mat_z = chunk_z.get_voxel(pos_z) if chunk_z else None
-						if not (mat_x and mat_x.ior == mat.ior):
-							ray.vel.x = mix(+ray.vel.x, -ray.vel.x, mat.ior)
-						if not (mat_y and mat_y.ior == mat.ior):
-							ray.vel.y = mix(+ray.vel.y, -ray.vel.y, mat.ior)
-						if not (mat_z and mat_z.ior == mat.ior):
-							ray.vel.z = mix(+ray.vel.z, -ray.vel.z, mat.ior)
+						if not mat_x or mat_x.ior != mat.ior:
+							ray.vel.x -= ray.vel.x * mat.ior * 2
+						if not mat_y or mat_y.ior != mat.ior:
+							ray.vel.y -= ray.vel.y * mat.ior * 2
+						if not mat_z or mat_z.ior != mat.ior:
+							ray.vel.z -= ray.vel.z * mat.ior * 2
 
 			# Advance the ray, move by frame LOD if inside a valid chunk or 1 unit if void
-			step = chunk.frame.lod if chunk.frame else 1
+			step = chunk.lod if chunk else 1
 			ray.step += step
 			ray.pos += ray.vel * step
 
@@ -176,8 +166,7 @@ class Window:
 		self.cam = Camera()
 		self.chunks = {}
 		self.timer = 0
-		self.iris = 0
-		self.iris_target = 0
+		self.iris = self.iris_target = 0
 		self.mouselook = True
 		self.running = True
 
@@ -214,19 +203,17 @@ class Window:
 
 		# Add available tiles to the canvas with performance information on top
 		tiles = []
-		rects = []
 		for t in range(len(self.tiles)):
 			if self.tiles[t]:
 				box = data.settings.tile[t]
 				tile = pg.image.frombytes(self.tiles[t], data.settings.tile_size, "RGBA")
 				tiles.append((tile, (box[0], box[1])))
-				rects.append((box[0] * data.settings.scale, box[1] * data.settings.scale, data.settings.tile_size[0] * data.settings.scale, data.settings.tile_size[1] * data.settings.scale))
 				self.pool.apply_async(self.cam.tile, args = (self.tiles[t], t, self.batches[t]), callback = self.draw_tile)
 				self.tiles[t] = None
-		if tiles and rects:
+		if tiles:
 			self.canvas.blits(tiles)
 			canvas = pg.Surface.copy(self.canvas)
-			color = pg.transform.average_color(canvas)
+			color = pg.transform.average_color(canvas, consider_alpha = True)
 
 			# Color spill: Multiply the canvas with its average color
 			if data.settings.spill:
@@ -262,7 +249,7 @@ class Window:
 			text = self.font.render(text_info, True, (255, 255, 255))
 			self.screen.blit(canvas, (0, 0))
 			self.screen.blit(text, (0, 0))
-			pg.display.update(rects)
+			pg.display.flip()
 
 	# Handle keyboard and mouse input, apply object movement for the camera controlled object
 	def input(self, obj_cam: data.Object, time: float):
@@ -291,13 +278,12 @@ class Window:
 				if e.key == pg.K_TAB:
 					self.mouselook = not self.mouselook
 			if e.type == pg.MOUSEWHEEL:
-				obj_cam.impulse(vec3(+d.z, 0, -d.x) * e.x * 5)
-				obj_cam.impulse(vec3(+d.x, +d.y, +d.z) * e.y * 5)
+				self.cam.lens = max(math.pi, min(math.pi * 48, self.cam.lens - e.y * 10))
 			if e.type == pg.MOUSEMOTION and self.mouselook:
 				center = self.box_win / 2
 				x, y = pg.mouse.get_pos()
 				ofs = vec2(center.x - x, center.y - y)
-				rot = vec3(0, +ofs.y, -ofs.x)
+				rot = vec3(0, ofs.x, ofs.y)
 				obj_cam.rotate(rot * units_mouse, data.settings.max_pitch)
 				pg.mouse.set_pos((center.x, center.y))
 
@@ -307,21 +293,21 @@ class Window:
 		if keys[pg.K_s]:
 			obj_cam.impulse(vec3(-d.x, -d.y, -d.z) * dh * units)
 		if keys[pg.K_a]:
-			obj_cam.impulse(vec3(-d.z, 0, +d.x) * dh * units)
-		if keys[pg.K_d]:
 			obj_cam.impulse(vec3(+d.z, 0, -d.x) * dh * units)
+		if keys[pg.K_d]:
+			obj_cam.impulse(vec3(-d.z, 0, +d.x) * dh * units)
 		if keys[pg.K_r] or keys[pg.K_SPACE]:
 			obj_cam.impulse(vec3(0, +1, 0) * dv * units_jump)
 		if keys[pg.K_f] or keys[pg.K_LCTRL]:
 			obj_cam.impulse(vec3(0, -1, 0) * dv * units_jump)
 		if keys[pg.K_UP]:
-			obj_cam.rotate(vec3(0, +5, 0) * units, data.settings.max_pitch)
-		if keys[pg.K_DOWN]:
-			obj_cam.rotate(vec3(0, -5, 0) * units, data.settings.max_pitch)
-		if keys[pg.K_LEFT]:
-			obj_cam.rotate(vec3(0, 0, -5) * units, data.settings.max_pitch)
-		if keys[pg.K_RIGHT]:
 			obj_cam.rotate(vec3(0, 0, +5) * units, data.settings.max_pitch)
+		if keys[pg.K_DOWN]:
+			obj_cam.rotate(vec3(0, 0, -5) * units, data.settings.max_pitch)
+		if keys[pg.K_LEFT]:
+			obj_cam.rotate(vec3(0, +5, 0) * units, data.settings.max_pitch)
+		if keys[pg.K_RIGHT]:
+			obj_cam.rotate(vec3(0, -5, 0) * units, data.settings.max_pitch)
 
 	# Get the LOD level of a chunk based on its distance to the camera position
 	def chunk_lod(self, pos: vec3):
@@ -365,7 +351,7 @@ class Window:
 								for z in range(pos_min.z, pos_max.z, lod):
 									pos = vec3(x, y, z)
 									if obj.intersects(pos, pos):
-										mat = spr.get_voxel(None, pos - obj.mins)
+										mat = spr.get_voxel(None, pos - obj.mins, obj.rot)
 										if mat:
 											pos_chunk = pos - pos_min
 											post_chunk = pos_chunk.tuple()

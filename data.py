@@ -39,8 +39,8 @@ settings = store(
 	batches = cfg.getint("RENDER", "batches") or 1,
 	dist_min = cfg.getint("RENDER", "dist_min") or 0,
 	dist_max = cfg.getint("RENDER", "dist_max") or 32,
-	max_light = cfg.getint("RENDER", "max_light") or 0,
-	max_bounces = cfg.getint("RENDER", "max_bounces") or 0,
+	max_light = cfg.getfloat("RENDER", "max_light") or 0,
+	max_bounces = cfg.getfloat("RENDER", "max_bounces") or 0,
 	lod_bounces = cfg.getfloat("RENDER", "lod_bounces") or 0,
 	lod_samples = cfg.getfloat("RENDER", "lod_samples") or 0,
 	lod_edge = cfg.getfloat("RENDER", "lod_edge") or 0,
@@ -82,7 +82,7 @@ class Material:
 			setattr(self, s, settings[s])
 
 	# Create a copy of this material that can be edited independently
-	def clone(self):
+	def copy(self):
 		return copy.deepcopy(self)
 
 # Frame: A subset of Sprite, also used by camera chunks to store render data, stores instances of Material to describe a single 3D model
@@ -224,7 +224,7 @@ class Sprite:
 			self.frames.append(Frame(packed = True, lod = self.lod))
 
 	# Create a copy of this sprite that can be edited independently
-	def clone(self):
+	def copy(self):
 		return copy.deepcopy(self)
 
 	# Set the animation range and speed at which it should be played
@@ -238,51 +238,7 @@ class Sprite:
 	# Updates the animation frame that should currently be displayed based on the time
 	def anim_update(self):
 		if self.frame_time and len(self.frames) > 1:
-			self.frame = math.trunc(self.frame_start + (pg.time.get_ticks() // self.frame_time) % (self.frame_end - self.frame_start))
-
-	# Get the sprites for all rotations of this sprite based on its original rotation
-	# Storing the result at startup is recommended to avoid costly data duplication at runtime, but the result can be parsed as object.set_sprite(*sprite.get_rotations())
-	def get_rotations(self):
-		spr_90 = self.clone()
-		spr_180 = self.clone()
-		spr_270 = self.clone()
-		spr_90.rotate(1)
-		spr_180.rotate(2)
-		spr_270.rotate(3)
-		return self, spr_90, spr_180, spr_270
-
-	# Rotate all frames in the sprite around the Y axis at a 90 degree step: 1 = 90*, 2 = 180*, 3 = 270*
-	# This operation is only supported if the X and Z axes of the sprite are equal, voxel meshes with uneven horizontal proportions can't be rotated
-	def rotate(self, angle: int):
-		if self.size.x != self.size.z:
-			print("Warning: Can't rotate uneven sprite of size " + str(self.size) + ", X and Z scale must be equal.")
-			return
-
-		for f in range(len(self.frames)):
-			voxels = self.frames[f]
-			self.clear(f)
-			for pos, mat in voxels.get_voxels():
-				if angle == 1:
-					pos = vec3(pos.z, pos.y, (self.size.x - 1) - pos.x)
-				elif angle == 2:
-					pos = vec3((self.size.x - 1) - pos.x, pos.y, (self.size.z - 1) - pos.z)
-				elif angle == 3:
-					pos = vec3((self.size.z - 1) - pos.z, pos.y, pos.x)
-				self.set_voxel(f, pos, mat)
-
-	# Mirror the sprite along the given axes
-	def flip(self, x: bool, y: bool, z: bool):
-		for f in range(len(self.frames)):
-			voxels = self.frames[f]
-			self.clear(f)
-			for pos, mat in voxels.get_voxels():
-				if x:
-					pos = vec3((self.size.x - 1) - pos.x, pos.y, pos.z)
-				if y:
-					pos = vec3(pos.x, (self.size.y - 1) - pos.y, pos.z)
-				if z:
-					pos = vec3(pos.x, pos.y, (self.size.z - 1) - pos.z)
-				self.set_voxel(f, pos, mat)
+			self.frame = math.trunc(self.frame_start + (pg.time.get_ticks() // self.frame_time) % (self.frame_end - self.frame_start + 1))
 
 	# Mix another sprite of the same size into the given sprite, None ignores changes so empty spaces don't override
 	# If the frame count of either sprite is shorter, only the amount of sprites that correspond will be mixed
@@ -300,8 +256,10 @@ class Sprite:
 					self.set_voxel(f, pos, mat)
 
 	# Get the relevant frame of the sprite, can be None to retreive the active frame instead of a specific frame
-	def get_frame(self, frame: int):
-		return self.frames[frame] if frame is not None else self.frames[self.frame]
+	def get_frame(self, frame):
+		if isinstance(frame, int):
+			return self.frames[frame]
+		return self.frames[self.frame]
 
 	# Add or remove a voxel at a single position, can be None to clear the voxel
 	# Position is local to the object and starts from the minimum corner, each axis should range between 0 and self.size - 1
@@ -337,13 +295,65 @@ class Sprite:
 					voxels[post] = mat
 		self.get_frame(frame).set_voxels(voxels)
 
-	# Get the voxel at this position, returns the material or None if empty or out of range
+	# Flip the position at which the voxel is being fetched and return the modified position
+	# Allows reading a mirrored version of the sprite
+	def pos_flipped(self, pos: vec3, x: bool, y: bool, z: bool):
+		end = self.size - 1
+		if x:
+			pos = vec3(end.x - pos.x, pos.y, pos.z)
+		if y:
+			pos = vec3(pos.x, end.y - pos.y, pos.z)
+		if z:
+			pos = vec3(pos.x, pos.y, end.z - pos.z)
+		return pos
+
+	# Rotate the position at which the voxel is being fetched and return the modified position
+	# Allows reading a different rotation of the sprite, used by rotated objects by default
+	# Rotation is only possible when the two axes opposite the rotation axis are equal in size
+	def pos_rotated(self, pos: vec3, rot: vec3):
+		end = self.size - 1
+		angle_x = round(rot.x / 90) % 4
+		angle_y = round(rot.y / 90) % 4
+		angle_z = round(rot.z / 90) % 4
+
+		# Rotate across the X axis
+		if angle_x and self.size.y == self.size.z:
+			if angle_x == 1:
+				pos = vec3(pos.x, end.z - pos.z, pos.y)
+			elif angle_x == 2:
+				pos = vec3(pos.x, end.y - pos.y, end.z - pos.z)
+			elif angle_x == 3:
+				pos = vec3(pos.x, pos.z, end.y - pos.y)
+
+		# Rotate across the Y axis
+		if angle_y and self.size.x == self.size.z:
+			if angle_y == 1:
+				pos = vec3(pos.z, pos.y, end.x - pos.x)
+			elif angle_y == 2:
+				pos = vec3(end.x - pos.x, pos.y, end.z - pos.z)
+			elif angle_y == 3:
+				pos = vec3(end.z - pos.z, pos.y, pos.x)
+
+		# Rotate across the Z axis
+		if angle_z and self.size.x == self.size.y:
+			if angle_z == 1:
+				pos = vec3(end.y - pos.y, pos.x, pos.z)
+			elif angle_z == 2:
+				pos = vec3(end.x - pos.x, end.y - pos.y, pos.z)
+			elif angle_z == 3:
+				pos = vec3(pos.y, end.x - pos.x, pos.z)
+
+		return pos
+
+	# Get the voxel at this position on the given frame, returns the material or None if empty or out of range
 	# Position is in local space, always convert the position to local coordinates before calling this
+	# The position is interpreted at the desired rotation, always provide the object rotation if this sprite belongs to an object
 	# Frame can be None to retreive the active frame instead of a specific frame, use this when drawing the sprite
-	def get_voxel(self, frame: int, pos: vec3):
+	def get_voxel(self, frame: int, pos: vec3, rot: vec3):
+		pos = self.pos_rotated(pos, rot)
 		return self.get_frame(frame).get_voxel(pos)
 
-	# Return a list of all voxels on the appropriate frame
+	# Return a list of all voxels on the given frame
 	def get_voxels(self, frame: int):
 		return self.get_frame(frame).get_voxels()
 
@@ -366,7 +376,8 @@ class Object:
 
 		self.visible = False
 		self.size = self.mins = self.maxs = vec3(0, 0, 0)
-		self.sprites = [None] * 4
+		self.weight = 0
+		self.sprite = None
 		self.cam_pos = None
 		self.move(self.pos)
 		objects.append(self)
@@ -377,7 +388,7 @@ class Object:
 		objects.remove(self)
 
 	# Create a copy of this object that can be edited independently
-	def clone(self):
+	def copy(self):
 		return copy.deepcopy(self)
 
 	# Mark that chunks touching the sprite of this object need to be recalculated by the renderer, used when the object's sprite or position changes
@@ -400,21 +411,25 @@ class Object:
 	# Change the virtual rotation of the object by the given amount, pitch is limited to the provided value
 	def rotate(self, rot: vec3, limit_pitch: float):
 		if rot != 0:
-			# Trigger a renderer update if this rotation changed the sprite angle
-			angle_old = round(self.rot.z / 90) % 4
+			# Trigger a render update if the new rotation crosses a 90* step and changes the sprite rotation
+			angle_x_old = round(self.rot.x / 90) % 4
+			angle_y_old = round(self.rot.y / 90) % 4
+			angle_z_old = round(self.rot.z / 90) % 4
 			self.rot = self.rot.rotate(rot)
-			angle_new = round(self.rot.z / 90) % 4
-			if angle_new != angle_old and self.sprites[angle_new] and self.sprites[angle_old]:
+			angle_x_new = round(self.rot.x / 90) % 4
+			angle_y_new = round(self.rot.y / 90) % 4
+			angle_z_new = round(self.rot.z / 90) % 4
+			if angle_x_new != angle_x_old or angle_y_new != angle_y_old or angle_z_new != angle_z_old:
 				self.area_update()
 
 			# Limit the pitch for special objects such as the player camera
 			if limit_pitch:
 				pitch_min = max(180, 360 - limit_pitch)
 				pitch_max = min(180, limit_pitch)
-				if self.rot.y > pitch_max and self.rot.y <= 180:
-					self.rot.y = pitch_max
-				if self.rot.y < pitch_min and self.rot.y > 180:
-					self.rot.y = pitch_min
+				if self.rot.z > pitch_max and self.rot.z <= 180:
+					self.rot.z = pitch_max
+				if self.rot.z < pitch_min and self.rot.z > 180:
+					self.rot.z = pitch_min
 
 	# Teleport the object to this origin, use only when necessary and prefer impulse instead
 	def move(self, pos):
@@ -431,9 +446,11 @@ class Object:
 
 	# Physics engine, applies velocity accounting for collisions with other objects and moves this object to the nearest empty space if one is available
 	def update_physics(self):
+		friction = elasticity = 0
 		self_spr = self.get_sprite()
 		vel_steps = self.vel
 		while(vel_steps != 0):
+			# Directions and their corresponding slice boundaries that will be checked, in order -X, +X, -Y, +Y, -Z, +Z
 			pos_dirs = {
 				(-1, 0, 0): (self.mins.x - 1, self.mins.y + 0, self.mins.z + 0, self.mins.x + 0, self.maxs.y + 0, self.maxs.z + 0),
 				(+1, 0, 0): (self.maxs.x + 0, self.mins.y + 0, self.mins.z + 0, self.maxs.x + 1, self.maxs.y + 0, self.maxs.z + 0),
@@ -443,44 +460,51 @@ class Object:
 				(0, 0, +1): (self.mins.x + 0, self.mins.y + 0, self.maxs.z + 0, self.maxs.x + 0, self.maxs.y + 0, self.maxs.z + 1),
 			}
 
-			# Scan other objects for common voxels in intersecting areas
-			# Directions and their corresponding slice boxes are checked in order -X, +X, -Y, +Y, -Z, +Z
-			# If a direction collides with any solid voxels, it's removed from the list to mark it as invalid for movement
-			# The check is also used to apply friction and elasticity from all neighboring voxels this object is touching
-			for post_dir, post6 in dict(pos_dirs).items():
-				pos_dir = vec3(post_dir[0], post_dir[1], post_dir[2])
-				for obj in objects:
-					if obj != self and obj.visible and obj.intersects(vec3(post6[0], post6[1], post6[2]), vec3(post6[3], post6[4], post6[5])):
-						obj_spr = obj.get_sprite()
-						for x in range(post6[0], post6[3] + 1):
-							for y in range(post6[1], post6[4] + 1):
-								for z in range(post6[2], post6[5] + 1):
-									pos = vec3(x, y, z)
-									obj_mat = obj_spr.get_voxel(None, pos - obj.mins)
-									if obj_mat and obj_mat.solidity > random.random():
-										self_mat = self_spr.get_voxel(None, pos - self.mins - pos_dir)
-										if self_mat and self_mat.solidity > random.random():
-											if post_dir in pos_dirs:
-												del pos_dirs[post_dir]
-												self.vel *= vec3(1, 1, 1) - abs(pos_dir)
-											self.vel -= pos_dir * abs(vel_steps) * (obj_mat.elasticity * self_mat.elasticity * settings.friction)
-											self.vel /= 1 + (obj_mat.friction * self_mat.friction * settings.friction)
+			# Check collisions in the direction of velocity, unnecessary directions are discarded before scanning other objects
+			for post3_dir, post6 in dict(pos_dirs).items():
+				pos_dir = vec3(post3_dir[0], post3_dir[1], post3_dir[2])
+				if not pos_dir.x * self.vel.x > 0 and not pos_dir.y * self.vel.y > 0 and not pos_dir.z * self.vel.z > 0:
+					del pos_dirs[post3_dir]
+				else:
+					for obj in objects:
+						if obj != self and obj.visible and obj.intersects(vec3(post6[0], post6[1], post6[2]), vec3(post6[3], post6[4], post6[5])):
+							# If we're colliding with another physical object, transfer velocity based on weight difference and projectile speed
+							if obj.physics:
+								vel = self.vel * max(0, min(1, abs(self.vel).maxs() * self.weight - obj.weight))
+								self.vel -= vel
+								obj.vel += vel
+
+							# If a direction collides with any solid voxels, it's removed from the list to mark it as invalid for movement
+							# This check is also used to apply friction and elasticity from all neighboring voxels the object is touching
+							obj_spr = obj.get_sprite()
+							for x in range(post6[0], post6[3] + 1):
+								for y in range(post6[1], post6[4] + 1):
+									for z in range(post6[2], post6[5] + 1):
+										pos = vec3(x, y, z)
+										obj_mat = obj_spr.get_voxel(None, pos - obj.mins, obj.rot)
+										if obj_mat and obj_mat.solidity > random.random():
+											self_mat = self_spr.get_voxel(None, pos - self.mins - pos_dir, self.rot)
+											if self_mat and self_mat.solidity > random.random():
+												friction += obj_mat.friction * self_mat.friction * settings.friction
+												elasticity += obj_mat.elasticity * self_mat.elasticity * settings.friction
+												if post3_dir in pos_dirs:
+													del pos_dirs[post3_dir]
 
 			# Preform a move in at most one unit, extract the amount of movement for this call from the total number of steps
 			# If velocity is greater than 1 the main loop will continue until the total velocity has been applied
 			# Note: Diagonal movement may intersect corners as direction checks only account for one axis
-			vel_step = vel_steps.min(+1).max(-1)
-			for post_dir in pos_dirs:
-				pos_dir = vec3(post_dir[0], post_dir[1], post_dir[2])
-				pos_step = vel_step * abs(pos_dir)
-				if vel_step.x * pos_dir.x > 0 or vel_step.y * pos_dir.y > 0 or vel_step.z * pos_dir.z > 0:
-					self.move(self.pos + pos_step)
+			vel_step = vel_steps.max(-1).min(+1)
 			vel_steps -= vel_step
+			vel_dirs = vec3(0, 0, 0)
+			for post in pos_dirs:
+				vel_dirs += vec3(post[0], post[1], post[2])
+			self.move(self.pos + vel_step * abs(vel_dirs))
 
 		# Apply global effects to velocity then bound it to the terminal velocity
-		for post, mat in self_spr.get_voxels(None).items():
-			self.vel -= vec3(0, mat.weight * settings.gravity, 0)
-		self.vel *= (1 - settings.friction_air)
+		self.vel -= vec3(0, self.weight * settings.gravity, 0)
+		self.vel -= self.vel * elasticity
+		self.vel /= 1 + friction
+		self.vel *= 1 - settings.friction_air
 		self.vel = self.vel.min(+settings.max_velocity).max(-settings.max_velocity)
 
 	# Update this object, called by the window every frame
@@ -488,7 +512,7 @@ class Object:
 	def update(self, pos_cam: vec3):
 		# Determine object visibility based on available sprites and the object's distance to the camera
 		visible_old = self.visible
-		self.visible = self.sprites[0] and self.pos.distance(pos_cam) <= settings.dist_max + self.size.maxs()
+		self.visible = self.sprite and self.pos.distance(pos_cam) <= settings.dist_max + self.size.maxs()
 		visible_new = self.visible
 		if visible_old != visible_new:
 			self.area_update()
@@ -500,32 +524,38 @@ class Object:
 			spr.anim_update()
 			frame_new = spr.frame
 			if frame_old != frame_new:
+				self.set_weight()
 				self.area_update()
+
 			if self.physics:
 				self.update_physics()
 			if self.function:
 				self.function(self)
 
-	# Set a sprite as the active sprite, None removes the sprite from this object and disables it
-	# If more than one sprite is provided, store up 4 sprites representing object angles
+	# Set a sprite as the active sprite, None removes the sprite and disables the object
 	# Set the size and bounding box of the object to that of its sprite, or a point if the sprite is disabled
-	def set_sprite(self, *sprites):
+	def set_sprite(self, sprite):
 		self.area_update()
 		self.size = self.mins = self.maxs = vec3(0, 0, 0)
-		for i in range(len(sprites)):
-			self.sprites[i] = sprites[i]
-		if self.sprites[0]:
-			self.size = math.trunc(self.sprites[0].size / 2)
+		if sprite:
+			self.sprite = sprite
+			self.size = math.trunc(self.sprite.size / 2)
 			self.mins = math.trunc(self.pos) - self.size
 			self.maxs = math.trunc(self.pos) + self.size
+		self.set_weight()
 		self.area_update()
 
-	# Get the appropriate sprite for this object based on which 0* / 90* / 180* / 270* direction it's facing toward
+	# Get the sprite assigned to this object
+	# Use the angles of this object when fetching voxels from the sprite to get the correct rotation
 	def get_sprite(self):
-		angle = round(self.rot.z / 90) % 4
-		if self.sprites[angle]:
-			return self.sprites[angle]
-		return self.sprites[0]
+		return self.sprite
+
+	# Calculate the weight of the object from the total weigh of its voxels
+	def set_weight(self):
+		self.weight = 0
+		if self.sprite:
+			for mat in self.sprite.get_voxels(None).values():
+				self.weight += mat.weight
 
 	# Mark that we want to attach the camera to this object at the provided position offset
 	# The camera can only be attached to one object at a time, this will remove the setting from all other objects
