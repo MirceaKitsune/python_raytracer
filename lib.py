@@ -144,12 +144,11 @@ class vec2:
 			return vec2(self.x, self.y) / ref
 		return self
 
-	# Snap to a grid unit, offset can be used to control how to snap to the unit (-1 = floor, 0 = round, +1 = ceil)
-	def snapped(self, unit, offset: float):
+	def snapped(self, unit):
 		if isinstance(unit, vec2):
-			return vec2(round(self.x / unit.x + offset / 2) * unit.x, round(self.y / unit.y + offset / 2) * unit.y)
+			return vec2((self.x // unit.x) * unit.x, (self.y // unit.y) * unit.y)
 		else:
-			return vec2(round(self.x / unit + offset / 2) * unit, round(self.y / unit + offset / 2) * unit)
+			return vec2((self.x // unit) * unit, (self.y // unit) * unit)
 
 # Vector3: A 3D vector containing X, Y, Z directions, typically used for positions and rotations in world space
 class vec3:
@@ -301,12 +300,11 @@ class vec3:
 			return vec3(self.x, self.y, self.z) / ref
 		return self
 
-	# Snap to a grid unit, offset can be used to control how to snap to the unit (-1 = floor, 0 = round, +1 = ceil)
-	def snapped(self, unit, offset: float):
+	def snapped(self, unit):
 		if isinstance(unit, vec3):
-			return vec3(round(self.x / unit.x + offset / 2) * unit.x, round(self.y / unit.y + offset / 2) * unit.y, round(self.z / unit.z + offset / 2) * unit.z)
+			return vec3((self.x // unit.x) * unit.x, (self.y // unit.y) * unit.y, (self.z // unit.z) * unit.z)
 		else:
-			return vec3(round(self.x / unit + offset / 2) * unit, round(self.y / unit + offset / 2) * unit, round(self.z / unit + offset / 2) * unit)
+			return vec3((self.x // unit) * unit, (self.y // unit) * unit, (self.z // unit) * unit)
 
 # RGB: Stores color in RGB format
 class rgb:

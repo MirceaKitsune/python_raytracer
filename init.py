@@ -18,7 +18,7 @@ class Camera:
 
 	# Get the frame of the chunk touching the given position
 	def chunk_get(self, pos: vec3):
-		pos_chunk = pos.snapped(data.settings.chunk_size, -1) + data.settings.chunk_radius
+		pos_chunk = pos.snapped(data.settings.chunk_size)
 		post_chunk = pos_chunk.tuple()
 		if post_chunk in self.chunks:
 			return self.chunks[post_chunk]
@@ -41,7 +41,7 @@ class Camera:
 		lens_y = (dir_y * data.settings.proportions) * self.lens + rand(data.settings.dof)
 		ray_rot = self.rot.rotate(vec3(0, -lens_x, -lens_y))
 		ray_dir = ray_rot.dir(True).normalize()
-		chunk_pos = chunk_min = chunk_max = vec3(0, 0, 0)
+		chunk_min = chunk_max = vec3(0, 0, 0)
 		chunk = None
 
 		# Ray data is kept in a data store so it can be easily delivered to material functions and support custom properties
@@ -62,17 +62,16 @@ class Camera:
 		# Note that diagonal steps are allowed and the ray can penetrate 1 voxel thick corners, checking in a stair pattern isn't supported due to performance
 		# The ray also returns the positions of chunks it traveled through which is used for occlusion culling
 		while ray.step < ray.life:
-			if not ray.pos >= chunk_min or not ray.pos <= chunk_max:
-				chunk_min = ray.pos.snapped(data.settings.chunk_size, -1)
-				chunk_pos = chunk_min + data.settings.chunk_radius
-				chunk_max = chunk_pos + data.settings.chunk_radius
-				post_chunk = chunk_pos.tuple()
+			if ray.pos.x < chunk_min.x or ray.pos.y < chunk_min.y or ray.pos.z < chunk_min.z or ray.pos.x > chunk_max.x or ray.pos.y > chunk_max.y or ray.pos.z > chunk_max.z:
+				chunk_min = ray.pos.snapped(data.settings.chunk_size)
+				chunk_max = chunk_min + data.settings.chunk_size
+				post_chunk = chunk_min.tuple()
 				chunk = self.chunks[post_chunk] if post_chunk in self.chunks else None
 				if not post_chunk in ray.traversed:
 					ray.traversed.append(post_chunk)
 
 			if chunk:
-				pos = math.trunc(ray.pos - ray.pos.snapped(data.settings.chunk_size, -1))
+				pos = math.trunc(ray.pos - ray.pos.snapped(data.settings.chunk_size))
 				mat = chunk.get_voxel(pos)
 				if mat:
 					# Call the material function and obtain the bounce amount, add it to the total number of bounces
@@ -93,9 +92,9 @@ class Camera:
 						ray_pos_x = ray.pos + vec3(1, 0, 0) if ray.vel.x < direction else ray.pos - vec3(1, 0, 0)
 						ray_pos_y = ray.pos + vec3(0, 1, 0) if ray.vel.y < direction else ray.pos - vec3(0, 1, 0)
 						ray_pos_z = ray.pos + vec3(0, 0, 1) if ray.vel.z < direction else ray.pos - vec3(0, 0, 1)
-						pos_x = math.trunc(ray_pos_x - ray_pos_x.snapped(data.settings.chunk_size, -1))
-						pos_y = math.trunc(ray_pos_y - ray_pos_y.snapped(data.settings.chunk_size, -1))
-						pos_z = math.trunc(ray_pos_z - ray_pos_z.snapped(data.settings.chunk_size, -1))
+						pos_x = math.trunc(ray_pos_x - ray_pos_x.snapped(data.settings.chunk_size))
+						pos_y = math.trunc(ray_pos_y - ray_pos_y.snapped(data.settings.chunk_size))
+						pos_z = math.trunc(ray_pos_z - ray_pos_z.snapped(data.settings.chunk_size))
 						chunk_x = chunk if ray_pos_x >= chunk_min and ray_pos_x <= chunk_max else self.chunk_get(ray_pos_x)
 						chunk_y = chunk if ray_pos_y >= chunk_min and ray_pos_y <= chunk_max else self.chunk_get(ray_pos_y)
 						chunk_z = chunk if ray_pos_z >= chunk_min and ray_pos_z <= chunk_max else self.chunk_get(ray_pos_z)
@@ -109,10 +108,9 @@ class Camera:
 						if not mat_z or mat_z.ior != mat.ior:
 							ray.vel.z -= ray.vel.z * mat.ior * 2
 
-			# Advance the ray, move by frame LOD if inside a valid chunk or 1 unit if void
-			step = chunk.lod if chunk else 1
-			ray.step += step
-			ray.pos += ray.vel * step
+			# Advance the ray step and increase position with velocity
+			ray.step += 1
+			ray.pos += ray.vel
 
 		# Run the background function and return the ray data
 		if data.background:
@@ -139,7 +137,8 @@ class Camera:
 						if data.settings.static:
 							random.seed((1 + x) * (1 + y) * (1 + sample))
 
-						ray = self.trace(dir_x, dir_y, detail / (1 + sample * data.settings.lod_samples))
+						ray_detail = detail / (1 + sample * data.settings.lod_samples) * (1 - data.settings.lod_random * random.random())
+						ray = self.trace(dir_x, dir_y, ray_detail)
 						alpha = round(min(1, ray.energy + data.settings.shutter) * 255)
 						colors.append(ray.color.array() + [alpha])
 						traversed = merge(traversed, ray.traversed)
@@ -244,7 +243,17 @@ class Window:
 				canvas_blur = pg.transform.smoothscale(canvas_blur, self.box.tuple())
 				canvas.blit(canvas_blur, (0, 0), special_flags = pg.BLEND_RGBA_ADD)
 
-			canvas = pg.transform.smoothscale(canvas, self.box_win.tuple()) if data.settings.smooth else pg.transform.scale(canvas, self.box_win.tuple())
+			# Filter: Scale the canvas to the window resolution, smooth and sharp passes are alternated to achieve the selected pixel filter
+			# 0 = Fully sharp, 1 = Fully smooth, < 1 = Emulate subsampling, > 1 = Emulate supersampling
+			if data.settings.scale > 1:
+				func_scale_by = pg.transform.scale_by if data.settings.smooth > 1 else pg.transform.smoothscale_by
+				func_scale = pg.transform.scale if data.settings.smooth < 1 else pg.transform.smoothscale
+				if data.settings.smooth and data.settings.smooth != 1:
+					fac = 1 / (1 - data.settings.smooth) if data.settings.smooth < 1 else data.settings.smooth
+					canvas = func_scale_by(canvas, (fac, fac))
+				canvas = func_scale(canvas, self.box_win.tuple())
+
+			# Add the info text to the canvas, blit the canvas to the screen, update Pygame display
 			text_info = str(data.settings.width) + " x " + str(data.settings.height) + " (" + str(data.settings.width * data.settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(data.settings.fps) + " FPS"
 			text = self.font.render(text_info, True, (255, 255, 255))
 			self.screen.blit(canvas, (0, 0))
@@ -333,15 +342,14 @@ class Window:
 
 			# Scan existing chunks and check if their LOD changed, force recalculation if so
 			for post, frame in self.chunks.items():
-				pos = vec3(post[0], post[1], post[2])
-				if not pos in data.objects_chunks_update and self.chunk_lod(pos) != frame.lod:
-					data.objects_chunks_update.append(pos)
+				pos_min = vec3(post[0], post[1], post[2])
+				if not pos_min in data.objects_chunks_update and self.chunk_lod(pos_min + data.settings.chunk_radius) != frame.lod:
+					data.objects_chunks_update.append(pos_min)
 
 			# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
-			for pos_center in data.objects_chunks_update:
-				pos_min = pos_center - data.settings.chunk_radius
-				pos_max = pos_center + data.settings.chunk_radius
-				lod = self.chunk_lod(pos_center)
+			for pos_min in data.objects_chunks_update:
+				pos_max = pos_min + data.settings.chunk_size
+				lod = self.chunk_lod(pos_min + data.settings.chunk_radius)
 				voxels = {}
 				for obj in data.objects:
 					if obj.visible and obj.intersects(pos_min, pos_max):
@@ -356,7 +364,7 @@ class Window:
 											pos_chunk = pos - pos_min
 											post_chunk = pos_chunk.tuple()
 											voxels[post_chunk] = mat
-				self.chunk_set(pos_center, voxels, lod)
+				self.chunk_set(pos_min, voxels, lod)
 			data.objects_chunks_update = []
 		self.cam.chunk_assign(self.chunks, unpack(self.traversed))
 

@@ -17,7 +17,7 @@ settings = store(
 	width = cfg.getint("WINDOW", "width") or 64,
 	height = cfg.getint("WINDOW", "height") or 64,
 	scale = cfg.getint("WINDOW", "scale") or 1,
-	smooth = cfg.getboolean("WINDOW", "smooth") or False,
+	smooth = cfg.getfloat("WINDOW", "smooth") or 0,
 	fps = cfg.getint("WINDOW", "fps") or 0,
 
 	sync = cfg.getboolean("RENDER", "sync") or False,
@@ -43,6 +43,7 @@ settings = store(
 	max_bounces = cfg.getfloat("RENDER", "max_bounces") or 0,
 	lod_bounces = cfg.getfloat("RENDER", "lod_bounces") or 0,
 	lod_samples = cfg.getfloat("RENDER", "lod_samples") or 0,
+	lod_random = cfg.getfloat("RENDER", "lod_random") or 0,
 	lod_edge = cfg.getfloat("RENDER", "lod_edge") or 0,
 	threads = cfg.getint("RENDER", "threads") or mp.cpu_count(),
 
@@ -115,7 +116,7 @@ class Frame:
 
 	# Get the voxel at this position from the frame, attempt to fetch by index from data3 followed by scanning data6 if not found
 	def get_voxel(self, pos: vec3):
-		pos = pos.snapped(self.lod, -1) if self.lod > 1 else pos
+		pos = pos.snapped(self.lod) if self.lod > 1 else pos
 		post3 = pos.tuple()
 		if post3 in self.data3:
 			return self.data3[post3]
@@ -127,7 +128,7 @@ class Frame:
 
 	# Set a voxel at this position on the frame, unpack the affected area since its content will be changed
 	def set_voxel(self, pos: vec3, mat: Material):
-		pos = pos.snapped(self.lod, -1) if self.lod > 1 else pos
+		pos = pos.snapped(self.lod) if self.lod > 1 else pos
 		self.unpack(pos)
 		post3 = pos.tuple()
 		if mat:
@@ -140,7 +141,7 @@ class Frame:
 	def set_voxels(self, voxels: dict):
 		for post3, mat in voxels.items():
 			pos = vec3(post3[0], post3[1], post3[2])
-			pos = pos.snapped(self.lod, -1) if self.lod > 1 else pos
+			pos = pos.snapped(self.lod) if self.lod > 1 else pos
 			self.unpack(pos)
 			if mat:
 				self.data3[post3] = mat
@@ -395,11 +396,11 @@ class Object:
 	# If the object moved or its sprite size has changed, this must be ran both before and after the change as to refresh chunks in both cases
 	def area_update(self):
 		if self.mins < self.maxs:
-			pos_min = self.mins.snapped(settings.chunk_size, -1) + settings.chunk_radius
-			pos_max = self.maxs.snapped(settings.chunk_size, +1) + settings.chunk_radius
-			for x in range(pos_min.x, pos_max.x, settings.chunk_size):
-				for y in range(pos_min.y, pos_max.y, settings.chunk_size):
-					for z in range(pos_min.z, pos_max.z, settings.chunk_size):
+			pos_min = self.mins.snapped(settings.chunk_size)
+			pos_max = self.maxs.snapped(settings.chunk_size)
+			for x in range(pos_min.x, pos_max.x + 1, settings.chunk_size):
+				for y in range(pos_min.y, pos_max.y + 1, settings.chunk_size):
+					for z in range(pos_min.z, pos_max.z + 1, settings.chunk_size):
 						pos = vec3(x, y, z)
 						if not pos in objects_chunks_update:
 							objects_chunks_update.append(pos)

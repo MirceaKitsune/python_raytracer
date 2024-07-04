@@ -30,7 +30,7 @@ Settings are stored within the mod's `config.cfg` file and can be used to modify
     - `width`: Number of horizontal pixels, higher values allow more detail but greatly affect performance.
     - `height`: Number of vertical pixels.
     - `scale`: The size of each pixel, acts as a multiplier to width and height.
-    - `smooth`: If false pixels are always sharp, if true use a bilinear filter when upscaling to the `scale` factor.
+    - `smooth`: Filter type to be used when rendering the canvas, requires `scale` to be greater than 1. Supports the following modes: 0 is always sharp, 1 is always soft, values between 0 and 1 create this amount of extra pixels and can be used to simulare a higher resolution for fewer ray traces, values greater than 1 gradually sharpen pixels for controlled smoothness.
     - `fps`: Target number of frames per second, the end result may be lower or higher based on practical performance. 0 disables the limit and allows the main loop to run as fast as possible. Rendering is suspended when the window isn't focused.
   - `RENDER`: Renderer related settings used by the camera.
     - `sync`: The window waits for all tiles to be ready before blending them to the canvas. If enabled threads will wait for each other, otherwise each thread will update as soon as possible. Disabling resulting in faster perceived performance at the cost of tearing when render threads are slower than the main window.
@@ -56,6 +56,7 @@ Settings are stored within the mod's `config.cfg` file and can be used to modify
     - `max_bounces`: Maximum number of bounces. 0 uses direct lighting, higher values allow this number of bounces. By default bounces increase the `absorption` material property per hit.
     - `lod_bounces`: Rays terminate faster with each bounce. 0 disables this optimization, at 1 each opaque bounce will half the life of a ray.
     - `lod_samples`: Subsequent samples have a shorter life. At 1 each sample has half the lifetime of the previous one. Boosts performance but may cause reflections and distant objects to fade sooner as well as induce color banding.
+    - `lod_random`: Randomly halves the lifetime of rays before tracing begins. 0 makes no changes, 0.5 allows rays to be terminated after half of their lifetime, 1 allows any ray to be randomly terminated. Boosts performance but introduces noise to objects that fade with distance.
     - `lod_edge`: Rays closer to the edge of the canvas start with a lower lifetime and will render fewer samples. Performance is improved by focusing more detail toward the center, at the cost of some detail loss near the edges. Stacks with other performance optimizations that rely on ray life such as `lod_bounces`.
     - `threads`: The number of threads to use for ray tracing by the thread pool, 0 uses all CPU cores. The screen is evenly divided into boxes totaling this amount so that each thread processes a different portion of the canvas. Ensure `width` and `height` are equally divisible to the resulting grid or borders may be appear near the screen edges.
   - `PHYSICS`: Physics related settings including player movement.
