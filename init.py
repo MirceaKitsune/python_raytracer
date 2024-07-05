@@ -9,10 +9,11 @@ import random
 import data
 
 # Camera: A subset of Window which only stores data needed for rendering and is used by threads, preforms ray tracing and draws tiles which are overlayed to the canvas by the main thread
+# Camera rotation is stored as quaternion rather than euler to facilitate rolling and calculating the perspective of light rays
 class Camera:
 	def __init__(self):
 		self.pos = vec3(0, 0, 0)
-		self.rot = vec3(0, 0, 0)
+		self.rot = quaternion(0, 0, 0, 0)
 		self.lens = data.settings.fov * math.pi / 8
 		self.chunks = {}
 
@@ -39,8 +40,9 @@ class Camera:
 		# Therefore at least one axis must be precisely -1 or +1 while others can be anything in that range, lower speeds are scaled accordingly based on the largest
 		lens_x = (dir_x / data.settings.proportions) * self.lens + rand(data.settings.dof)
 		lens_y = (dir_y * data.settings.proportions) * self.lens + rand(data.settings.dof)
-		ray_rot = self.rot.rotate(vec3(0, -lens_x, -lens_y))
-		ray_dir = ray_rot.dir(True).normalize()
+		lens = vec3(0, -lens_x, +lens_y)
+		ray_rot = self.rot.multiply(lens.quaternion())
+		ray_dir = ray_rot.vec_forward()
 		chunk_min = chunk_max = vec3(0, 0, 0)
 		chunk = None
 
@@ -108,9 +110,10 @@ class Camera:
 						if not mat_z or mat_z.ior != mat.ior:
 							ray.vel.z -= ray.vel.z * mat.ior * 2
 
-			# Advance the ray step and increase position with velocity
-			ray.step += 1
-			ray.pos += ray.vel
+			# Advance the ray, move by frame LOD if inside a valid chunk or skip toward the safest possible distance to the nearest chunk if void
+			step = chunk.lod if chunk else 1 + abs(data.settings.chunk_radius - (ray.pos.mins() + data.settings.chunk_radius) % data.settings.chunk_size)
+			ray.step += step
+			ray.pos += ray.vel * step
 
 		# Run the background function and return the ray data
 		if data.background:
@@ -267,7 +270,7 @@ class Window:
 		units = data.settings.speed_move * time
 		units_jump = data.settings.speed_jump / (1 + time)
 		units_mouse = data.settings.speed_mouse / (1 + time * 1000)
-		d = obj_cam.rot.dir(False)
+		d = self.cam.rot.vec_forward()
 		dh = vec3(1, 0, 1) if data.settings.max_pitch else vec3(1, 1, 1)
 		dv = vec3(0, 1, 0) if data.settings.max_pitch else vec3(1, 1, 1)
 
@@ -292,7 +295,7 @@ class Window:
 				center = self.box_win / 2
 				x, y = pg.mouse.get_pos()
 				ofs = vec2(center.x - x, center.y - y)
-				rot = vec3(0, ofs.x, ofs.y)
+				rot = vec3(0, +ofs.x, -ofs.y)
 				obj_cam.rotate(rot * units_mouse, data.settings.max_pitch)
 				pg.mouse.set_pos((center.x, center.y))
 
@@ -317,6 +320,10 @@ class Window:
 			obj_cam.rotate(vec3(0, +5, 0) * units, data.settings.max_pitch)
 		if keys[pg.K_RIGHT]:
 			obj_cam.rotate(vec3(0, -5, 0) * units, data.settings.max_pitch)
+		if keys[pg.K_LEFTBRACKET]:
+			obj_cam.rotate(vec3(-5, 0, 0) * units, data.settings.max_pitch)
+		if keys[pg.K_RIGHTBRACKET]:
+			obj_cam.rotate(vec3(+5, 0, 0) * units, data.settings.max_pitch)
 
 	# Get the LOD level of a chunk based on its distance to the camera position
 	def chunk_lod(self, pos: vec3):
@@ -385,10 +392,10 @@ class Window:
 			obj.update(self.cam.pos)
 
 		if pg.mouse.get_focused():
-			d = obj_cam.rot.dir(False)
+			d = self.cam.rot.vec_forward()
 			self.iris = mix(self.iris, self.iris_target * data.settings.iris, data.settings.iris_time * time)
 			self.cam.pos = obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z)
-			self.cam.rot = obj_cam.rot
+			self.cam.rot = obj_cam.rot.quaternion()
 			self.chunk_update(time)
 			self.draw()
 			pg.mouse.set_visible(not self.mouselook)

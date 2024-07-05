@@ -7,8 +7,9 @@ Experimental CPU based voxel raytracing engine written in Python and based on Py
 The code is under the GPL license, created and developed by MirceaKitsune. Execute `python3 ./init.py` to start the engine with the default test scene. Use the mouse to look around with the following keys:
 
  - `WASDRF`: Move forward, backward, left, right, up, down. `Space` and `Control` can also be used to jump or descend.
- - `Mouse wheel`: Zoom in and out.
  - `Arrows`: Look up, down, left, right.
+ - `Mouse wheel`: Zoom in and out.
+ - `[]`: Tilt the camera to the left or right.
  - `Tab`: Toggle mouse look and pointer grabbing.
  - `Shift`: Hold to move 5 times faster with the keyboard.
 

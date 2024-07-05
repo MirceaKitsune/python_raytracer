@@ -139,8 +139,8 @@ class vec2:
 		return self * bias2 + other * bias1
 
 	def normalize(self):
-		ref = max(abs(self.x), abs(self.y))
-		if ref:
+		ref = abs(self).maxs()
+		if ref and ref != 1:
 			return vec2(self.x, self.y) / ref
 		return self
 
@@ -283,20 +283,9 @@ class vec3:
 	def rotate(self, other):
 		return vec3((self.x + other.x) % 360, (self.y + other.y) % 360, (self.z + other.z) % 360)
 
-	# Directions X and Z are calculated from rotation Z, direction Y is calculated from rotation Y, rotation X is ignored as roll is currently not supported
-	# If normalized X and Z scale with Y to maintain a constant magnitude of the direction vector, desired for camera projection but should be off when calculating movement vectors
-	# X: -1 = Left, +1 = Right. Y: -1 = Down, +1 = Up. Z: -1 = Backward, +1 = Forward.
-	def dir(self, normalize: bool):
-		rad_y = math.radians(self.y)
-		rad_z = math.radians(self.z)
-		dir_x = math.sin(rad_y) * math.cos(rad_z) if normalize else math.sin(rad_y)
-		dir_y = math.sin(rad_z)
-		dir_z = math.cos(rad_y) * math.cos(rad_z) if normalize else math.cos(rad_y)
-		return vec3(dir_x, dir_y, dir_z)
-
 	def normalize(self):
-		ref = max(abs(self.x), abs(self.y), abs(self.z))
-		if ref:
+		ref = abs(self).maxs()
+		if ref and ref != 1:
 			return vec3(self.x, self.y, self.z) / ref
 		return self
 
@@ -305,6 +294,77 @@ class vec3:
 			return vec3((self.x // unit.x) * unit.x, (self.y // unit.y) * unit.y, (self.z // unit.z) * unit.z)
 		else:
 			return vec3((self.x // unit) * unit, (self.y // unit) * unit, (self.z // unit) * unit)
+
+	# Euler to quaternion, returns a quaternion rotation from self
+	def quaternion(self):
+		rad_x = math.radians(self.x)
+		rad_y = math.radians(self.y)
+		rad_z = math.radians(self.z)
+
+		sin_x = math.sin(rad_x / 2)
+		cos_x = math.cos(rad_x / 2)
+		sin_y = math.sin(rad_y / 2)
+		cos_y = math.cos(rad_y / 2)
+		sin_z = math.sin(rad_z / 2)
+		cos_z = math.cos(rad_z / 2)
+
+		x = sin_x * cos_y * cos_z - cos_x * sin_y * sin_z
+		y = cos_x * sin_y * cos_z + sin_x * cos_y * sin_z
+		z = cos_x * cos_y * sin_z - sin_x * sin_y * cos_z
+		w = cos_x * cos_y * cos_z + sin_x * sin_y * sin_z
+		return quaternion(x, y, z, w)
+
+# Quaternion: A special vector used to store and handle quaternion rotations
+class quaternion:
+	__slots__ = ("x", "y", "z", "w")
+
+	def __init__(self, x: float, y: float, z: float, w: float):
+		self.x = x
+		self.y = y
+		self.z = z
+		self.w = w
+
+	def dot(self, other):
+		return self.x * other.x + self.y * other.y + self.z * other.z + self.w * other.w
+
+	def multiply(self, other):
+		x = other.x * self.w + other.y * self.z - other.z * self.y + other.w * self.x
+		y = other.x * self.z + other.y * self.w + other.z * self.x + other.w * self.y
+		z = other.x * self.y - other.y * self.x + other.z * self.w + other.w * self.z
+		w = other.x * self.x - other.y * self.y - other.z * self.z + other.w * self.w
+		return quaternion(x, y, z, w)
+
+	def vec_right(self):
+		x = 1 - 2 * (self.y * self.y + self.x * self.x)
+		y = 2 * (self.z * self.y + self.w * self.x)
+		z = 2 * (self.z * self.x - self.w * self.y)
+		return vec3(x, y, z)
+
+	def vec_up(self):
+		x = 2 * (self.z * self.y - self.w * self.x)
+		y = 1 - 2 * (self.z * self.z + self.x * self.x)
+		z = 2 * (self.y * self.x + self.w * self.z)
+		return vec3(x, y, z)
+
+	def vec_forward(self):
+		x = 2 * (self.z * self.x + self.w * self.y)
+		y = 2 * (self.y * self.x - self.w * self.z)
+		z = 1 - 2 * (self.z * self.z + self.y * self.y)
+		return vec3(x, y, z)
+
+	# Quaternion to euler, returns an euler rotation from self
+	def euler(self):
+		sin_x_cos_y = 2 * (self.w * self.x + self.y * self.z)
+		sin_z_cos_y = 2 * (self.w * self.z + self.x * self.y)
+		cos_x_cos_y = 1 - 2 * (self.x * self.x + self.y * self.y)
+		cos_z_cos_y = 1 - 2 * (self.y * self.y + self.z * self.z)
+		sin_y = math.sqrt(1 + 2 * (self.w * self.y - self.x * self.z))
+		cos_y = math.sqrt(1 - 2 * (self.w * self.y - self.x * self.z))
+
+		deg_x = math.degrees(math.atan2(sin_x_cos_y, cos_x_cos_y))
+		deg_y = math.degrees(2 * math.atan2(sin_y, cos_y) - math.pi / 2)
+		deg_z = math.degrees(math.atan2(sin_z_cos_y, cos_z_cos_y))
+		return vec3(deg_x, deg_y, deg_z)
 
 # RGB: Stores color in RGB format
 class rgb:
