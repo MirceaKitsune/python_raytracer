@@ -53,8 +53,10 @@ settings = store(
 	speed_jump = cfg.getfloat("PHYSICS", "speed_jump") or 1,
 	speed_move = cfg.getfloat("PHYSICS", "speed_move") or 1,
 	speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 1,
+	min_velocity = cfg.getfloat("PHYSICS", "min_velocity") or 0,
 	max_velocity = cfg.getfloat("PHYSICS", "max_velocity") or 0,
 	max_pitch = cfg.getfloat("PHYSICS", "max_pitch") or 0,
+	max_roll = cfg.getfloat("PHYSICS", "max_roll") or 0,
 	dist_move = cfg.getint("PHYSICS", "dist_move") or 0,
 )
 settings.proportions = ((settings.width + settings.height) / 2) / max(settings.width, settings.height)
@@ -379,7 +381,7 @@ class Object:
 		self.size = self.mins = self.maxs = vec3(0, 0, 0)
 		self.weight = 0
 		self.sprite = None
-		self.cam_pos = None
+		self.cam_vec = self.cam_pos = self.cam_rot = None
 		self.move(self.pos)
 		objects.append(self)
 
@@ -401,16 +403,16 @@ class Object:
 			for x in range(pos_min.x, pos_max.x + 1, settings.chunk_size):
 				for y in range(pos_min.y, pos_max.y + 1, settings.chunk_size):
 					for z in range(pos_min.z, pos_max.z + 1, settings.chunk_size):
-						pos = vec3(x, y, z)
-						if not pos in objects_chunks_update:
-							objects_chunks_update.append(pos)
+						post = (x, y, z)
+						if not post in objects_chunks_update:
+							objects_chunks_update.append(post)
 
 	# Check whether another item intersects the bounding box of this object, pos_min and pos_max represent the corners of another box or a point if identical
 	def intersects(self, pos_min: vec3, pos_max: vec3):
 		return pos_min <= self.maxs and pos_max >= self.mins
 
-	# Change the virtual rotation of the object by the given amount, pitch is limited to the provided value
-	def rotate(self, rot: vec3, limit_pitch: float):
+	# Change the virtual rotation of the object by the given amount
+	def rotate(self, rot: vec3):
 		if rot != 0:
 			# Trigger a render update if the new rotation crosses a 90* step and changes the sprite rotation
 			angle_x_old = round(self.rot.x / 90) % 4
@@ -422,15 +424,8 @@ class Object:
 			angle_z_new = round(self.rot.z / 90) % 4
 			if angle_x_new != angle_x_old or angle_y_new != angle_y_old or angle_z_new != angle_z_old:
 				self.area_update()
-
-			# Limit the pitch for special objects such as the player camera
-			if limit_pitch:
-				pitch_min = max(180, 360 - limit_pitch)
-				pitch_max = min(180, limit_pitch)
-				if self.rot.z > pitch_max and self.rot.z <= 180:
-					self.rot.z = pitch_max
-				if self.rot.z < pitch_min and self.rot.z > 180:
-					self.rot.z = pitch_min
+			if self.cam_vec:
+				self.set_camera_pos()
 
 	# Teleport the object to this origin, use only when necessary and prefer impulse instead
 	def move(self, pos):
@@ -440,9 +435,11 @@ class Object:
 			self.mins = math.trunc(self.pos) - self.size
 			self.maxs = math.trunc(self.pos) + self.size
 			self.area_update()
+			if self.cam_vec:
+				self.set_camera_pos()
 
 	# Add velocity to this object, 1 is the maximum speed allowed for objects
-	def impulse(self, vel):
+	def accelerate(self, vel):
 		self.vel += vel
 
 	# Physics engine, applies velocity accounting for collisions with other objects and moves this object to the nearest empty space if one is available
@@ -507,6 +504,12 @@ class Object:
 		self.vel /= 1 + friction
 		self.vel *= 1 - settings.friction_air
 		self.vel = self.vel.min(+settings.max_velocity).max(-settings.max_velocity)
+		if abs(self.vel.x) < settings.min_velocity:
+			self.vel.x = 0
+		if abs(self.vel.y) < settings.min_velocity:
+			self.vel.y = 0
+		if abs(self.vel.z) < settings.min_velocity:
+			self.vel.z = 0
 
 	# Update this object, called by the window every frame
 	# An immediate renderer update is issued when the object changes visibility or the sprite animation advances
@@ -558,11 +561,22 @@ class Object:
 			for mat in self.sprite.get_voxels(None).values():
 				self.weight += mat.weight
 
+	# Update the world camera position and rotation coordinates for camera objects
+	def set_camera_pos(self):
+		if self.cam_vec:
+			self.cam_rot = self.rot.quaternion()
+			d = self.cam_rot.vec_forward()
+			self.cam_pos = self.pos + vec3(self.cam_vec.x * d.x, self.cam_vec.y, self.cam_vec.x * d.z)
+		else:
+			self.cam_pos = None
+			self.cam_rot = None
+
 	# Mark that we want to attach the camera to this object at the provided position offset
 	# The camera can only be attached to one object at a time, this will remove the setting from all other objects
 	def set_camera(self, pos: vec2):
 		for obj in objects:
-			obj.cam_pos = pos if obj == self else None
+			obj.cam_vec = pos if obj == self else None
+			obj.set_camera_pos()
 
 # Execute the init script of the loaded mod
 importlib.import_module("mods." + mod + ".init")

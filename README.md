@@ -6,12 +6,11 @@ Experimental CPU based voxel raytracing engine written in Python and based on Py
 
 The code is under the GPL license, created and developed by MirceaKitsune. Execute `python3 ./init.py` to start the engine with the default test scene. Use the mouse to look around with the following keys:
 
- - `WASDRF`: Move forward, backward, left, right, up, down. `Space` and `Control` can also be used to jump or descend.
- - `Arrows`: Look up, down, left, right.
- - `Mouse wheel`: Zoom in and out.
- - `[]`: Tilt the camera to the left or right.
+ - `WASDRF, Arrows`: Move forward, backward, left, right, up, down. `Space` and `Control` can also be used to jump or descend.
+ - `Numpad`: Look up down left right with num 8 2 4 6, tilt view with num 7 9.
+ - `Mouse`: Zoom in and out with the mouse wheel, back and forward to tilt view.
  - `Tab`: Toggle mouse look and pointer grabbing.
- - `Shift`: Hold to move 5 times faster with the keyboard.
+ - `Shift`: Hold to move twice faster.
 
 ## Features and TODO
 
@@ -45,7 +44,7 @@ Settings are stored within the mod's `config.cfg` file and can be used to modify
     - `bloom`: Cover and intensity of bloom. 0 disables bloom, 0.5 produces bloom starting from pixels that are halfway bright, 1 blurs the entire image.
     - `bloom_blur`: The bloom pass is downscaled by this amount, roughly represents the radius in pixels for the bloom effect.
     - `falloff`: The amount by which light tapers off with hits, controls overall brightness. 0 is the brightest settings as it makes rays not lose energy between bounces, increasing this offers more vivid colors but also makes the scene darker.
-    - `chunk_rate`: Refresh rate for chunk updates in milliseconds. Limits recalculating updates to renderer chunks, camera movement and object physics still work at the normal FPS. Reduces main thread workload and improves overall performance, but moving objects and animated sprites will be updated slower. Note that this acts as a limiter to the sprite animation rate, animated sprites faster than this setting will skip frames.
+    - `chunk_rate`: Refresh rate for chunk updates in milliseconds. Limits recalculating updates to renderer chunks, camera movement and object physics still work at the normal FPS. Reduces main thread workload and improves overall performance, but moving objects and animated sprites will be updated slower while chunks may take longer to load into view if `culling` is enabled. Note that this acts as a limiter to the sprite animation rate, animated sprites faster than this setting will skip frames.
     - `chunk_size`: The chunk size used by the renderer. Smaller values result in more small boxes holding less data, larger values store fewer frames containing more voxels, eg: Each chunk holds 64 voxels if this is 4 (4 x 4 x 4). Chunk are recalculated when any object touching them moves or changes sprite, large values result in more recalculations thus lower performance. Must be an even number and less than `dist_max`, 16 is recommended for the best performance.
     - `chunk_lod`: Number of LOD steps for chunks. Values above 1 cause chunks that are further from the camera to be stored at a lower resolution. This reduces data and improves performance, but you may see parts of distant objects become blocky or disappear. Must always be lower than `chunk_size`, the larger the draw distance the safer it is to increase this.
     - `fov`: Field of view in degrees, higher values make the viewport wider.
@@ -67,8 +66,10 @@ Settings are stored within the mod's `config.cfg` file and can be used to modify
     - `speed_jump`: Jump speed of the player, determines how fast the player moves vertically.
     - `speed_move`: Keyboard movement speed of the player, determines how fast the camera moves when using the movement keys.
     - `speed_mouse`: Mouse rotation speed of the player, determines how fast the camera rotates when moving the mouse in mouselook mode.
+    - `min_velocity`: Enforces a minimum velocity under which objects won't move and their velocity is discarded. Prevents unnecessary updates for tiny speeds that won't be noticed, setting this too high may cause objects to stop moving too soon.
     - `max_velocity`: Terminal velocity of objects, represents the maximum allowed velocity and how many units per tick objects can move. Limits excessive speeds and minimizes performance impact for large velocities.
     - `max_pitch`: Maximum pitch angle in degrees, the camera can't look lower or higher than this amount. 0 disables, use a value below 180, 90 is recommended. When set horizontal movement keys won't affect vertical movement and vice versa.
+    - `max_roll`: Maximum roll angle in degrees.
     - `dist_move`: Object logic is suspended for objects further than this distance. Includes physics as well as updates to sprite animation. Limits expensive collision checks as well as updates to renderer chunks from movement or animated sprites, but distant objects will appear frozen.
 
 ## Default material settings

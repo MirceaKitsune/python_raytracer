@@ -295,7 +295,6 @@ class vec3:
 		else:
 			return vec3((self.x // unit) * unit, (self.y // unit) * unit, (self.z // unit) * unit)
 
-	# Euler to quaternion, returns a quaternion rotation from self
 	def quaternion(self):
 		rad_x = math.radians(self.x)
 		rad_y = math.radians(self.y)
@@ -309,8 +308,8 @@ class vec3:
 		cos_z = math.cos(rad_z / 2)
 
 		x = sin_x * cos_y * cos_z - cos_x * sin_y * sin_z
-		y = cos_x * sin_y * cos_z + sin_x * cos_y * sin_z
-		z = cos_x * cos_y * sin_z - sin_x * sin_y * cos_z
+		y = cos_x * sin_y * cos_z - sin_x * cos_y * sin_z
+		z = cos_x * cos_y * sin_z + sin_x * sin_y * cos_z
 		w = cos_x * cos_y * cos_z + sin_x * sin_y * sin_z
 		return quaternion(x, y, z, w)
 
@@ -328,43 +327,29 @@ class quaternion:
 		return self.x * other.x + self.y * other.y + self.z * other.z + self.w * other.w
 
 	def multiply(self, other):
-		x = other.x * self.w + other.y * self.z - other.z * self.y + other.w * self.x
-		y = other.x * self.z + other.y * self.w + other.z * self.x + other.w * self.y
-		z = other.x * self.y - other.y * self.x + other.z * self.w + other.w * self.z
-		w = other.x * self.x - other.y * self.y - other.z * self.z + other.w * self.w
+		x = self.w * other.x + self.z * other.y - self.y * other.z + self.x * other.w
+		y = self.z * other.x + self.w * other.y + self.x * other.z + self.y * other.w
+		z = self.y * other.x - self.x * other.y + self.w * other.z + self.z * other.w
+		w = self.x * other.x - self.y * other.y - self.z * other.z + self.w * other.w
 		return quaternion(x, y, z, w)
 
 	def vec_right(self):
-		x = 1 - 2 * (self.y * self.y + self.x * self.x)
+		x = 1 - 2 * (self.y ** 2 + self.x ** 2)
 		y = 2 * (self.z * self.y + self.w * self.x)
 		z = 2 * (self.z * self.x - self.w * self.y)
 		return vec3(x, y, z)
 
 	def vec_up(self):
 		x = 2 * (self.z * self.y - self.w * self.x)
-		y = 1 - 2 * (self.z * self.z + self.x * self.x)
+		y = 1 - 2 * (self.z ** 2 + self.x ** 2)
 		z = 2 * (self.y * self.x + self.w * self.z)
 		return vec3(x, y, z)
 
 	def vec_forward(self):
 		x = 2 * (self.z * self.x + self.w * self.y)
 		y = 2 * (self.y * self.x - self.w * self.z)
-		z = 1 - 2 * (self.z * self.z + self.y * self.y)
+		z = 1 - 2 * (self.z ** 2 + self.y ** 2)
 		return vec3(x, y, z)
-
-	# Quaternion to euler, returns an euler rotation from self
-	def euler(self):
-		sin_x_cos_y = 2 * (self.w * self.x + self.y * self.z)
-		sin_z_cos_y = 2 * (self.w * self.z + self.x * self.y)
-		cos_x_cos_y = 1 - 2 * (self.x * self.x + self.y * self.y)
-		cos_z_cos_y = 1 - 2 * (self.y * self.y + self.z * self.z)
-		sin_y = math.sqrt(1 + 2 * (self.w * self.y - self.x * self.z))
-		cos_y = math.sqrt(1 - 2 * (self.w * self.y - self.x * self.z))
-
-		deg_x = math.degrees(math.atan2(sin_x_cos_y, cos_x_cos_y))
-		deg_y = math.degrees(2 * math.atan2(sin_y, cos_y) - math.pi / 2)
-		deg_z = math.degrees(math.atan2(sin_z_cos_y, cos_z_cos_y))
-		return vec3(deg_x, deg_y, deg_z)
 
 # RGB: Stores color in RGB format
 class rgb:

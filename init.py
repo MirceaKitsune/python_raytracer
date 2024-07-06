@@ -17,20 +17,21 @@ class Camera:
 		self.lens = data.settings.fov * math.pi / 8
 		self.chunks = {}
 
-	# Get the frame of the chunk touching the given position
+	# Clear all chunks from the camera
+	def chunk_clear(self):
+		self.chunks = {}
+
+	# Add a new chunk frame to the camera at this position
+	def chunk_set(self, post: tuple, chunk: data.Frame):
+		self.chunks[post] = chunk
+
+	# Get the frame of the chunk touched by this position if one exists
 	def chunk_get(self, pos: vec3):
 		pos_chunk = pos.snapped(data.settings.chunk_size)
 		post_chunk = pos_chunk.tuple()
 		if post_chunk in self.chunks:
 			return self.chunks[post_chunk]
 		return None
-
-	# Assign valid chunks based on the positions traversed by rays during the previous trace, enforces occlusion culling and view frustum culling
-	def chunk_assign(self, chunks: dict, traversed: list):
-		self.chunks = {}
-		for post in chunks:
-			if not data.settings.culling or post in traversed:
-				self.chunks[post] = chunks[post]
 
 	# Trace the pixel based on the given 2D direction which is used to calculate ray velocity from lens distorsion: X = -1 is left, X = +1 is right, Y = -1 is down, Y = +1 is up
 	# Returns the ray data after processing is over, the result represents the ray state during the last step it has preformed
@@ -171,6 +172,8 @@ class Window:
 		self.iris = self.iris_target = 0
 		self.mouselook = True
 		self.running = True
+		self.input_vel = vec3(0, 0, 0)
+		self.input_rot = vec3(0, 0, 0)
 
 		# Containers for items indexed by thread number
 		surface = pg.Surface(data.settings.tile_size, pg.SRCALPHA)
@@ -263,67 +266,143 @@ class Window:
 			self.screen.blit(text, (0, 0))
 			pg.display.flip()
 
-	# Handle keyboard and mouse input, apply object movement for the camera controlled object
-	def input(self, obj_cam: data.Object, time: float):
-		keys = pg.key.get_pressed()
+	# Handle keyboard and mouse input, apply object movement and rotation for the main object
+	def input(self, obj_main: data.Object, time: float):
 		mods = pg.key.get_mods()
-		units = data.settings.speed_move * time
-		units_jump = data.settings.speed_jump / (1 + time)
-		units_mouse = data.settings.speed_mouse / (1 + time * 1000)
-		d = self.cam.rot.vec_forward()
-		dh = vec3(1, 0, 1) if data.settings.max_pitch else vec3(1, 1, 1)
-		dv = vec3(0, 1, 0) if data.settings.max_pitch else vec3(1, 1, 1)
+		mouse_rot = vec2(0, 0)
 
-		# Mods: Acceleration
-		if mods & pg.KMOD_SHIFT:
-			units *= 5
-
-		# One time events: Quit, request quit or toggle mouselook, mouse wheel movement, mouse motion
+		# Read pending events and preform the appropriate actions based on mouse movement or the keys being pressed or released
 		for e in pg.event.get():
-			if e.type == pg.QUIT:
-				self.running = False
-				return
-			if e.type == pg.KEYDOWN:
-				if e.key == pg.K_ESCAPE:
+			match e.type:
+				case pg.QUIT:
 					self.running = False
 					return
-				if e.key == pg.K_TAB:
-					self.mouselook = not self.mouselook
-			if e.type == pg.MOUSEWHEEL:
-				self.cam.lens = max(math.pi, min(math.pi * 48, self.cam.lens - e.y * 10))
-			if e.type == pg.MOUSEMOTION and self.mouselook:
-				center = self.box_win / 2
-				x, y = pg.mouse.get_pos()
-				ofs = vec2(center.x - x, center.y - y)
-				rot = vec3(0, +ofs.x, -ofs.y)
-				obj_cam.rotate(rot * units_mouse, data.settings.max_pitch)
-				pg.mouse.set_pos((center.x, center.y))
+				case pg.MOUSEMOTION:
+					if self.mouselook:
+						x, y = pg.mouse.get_pos()
+						center = self.box_win / 2
+						mouse_rot.x += center.x - x
+						mouse_rot.y += center.y - y
+						pg.mouse.set_pos((center.x, center.y))
+						pg.event.clear(pg.MOUSEMOTION)
+				case pg.MOUSEWHEEL:
+					self.cam.lens = max(math.pi, min(math.pi * 48, self.cam.lens - e.y * 10))
+				case pg.MOUSEBUTTONUP:
+					match e.button:
+						case 6:
+							self.input_rot.x += 10
+						case 7:
+							self.input_rot.x -= 10
+				case pg.MOUSEBUTTONDOWN:
+					match e.button:
+						case 6:
+							self.input_rot.x -= 10
+						case 7:
+							self.input_rot.x += 10
+				case pg.KEYUP:
+					match e.key:
+						case pg.K_w | pg.K_UP:
+							self.input_vel.z -= 1
+						case pg.K_s | pg.K_DOWN:
+							self.input_vel.z += 1
+						case pg.K_a | pg.K_LEFT:
+							self.input_vel.x -= 1
+						case pg.K_d | pg.K_RIGHT:
+							self.input_vel.x += 1
+						case pg.K_r | pg.K_SPACE:
+							self.input_vel.y -= 1
+						case pg.K_f | pg.K_LCTRL:
+							self.input_vel.y += 1
+						case pg.K_KP2:
+							self.input_rot.z -= 10
+						case pg.K_KP8:
+							self.input_rot.z += 10
+						case pg.K_KP4:
+							self.input_rot.y -= 10
+						case pg.K_KP6:
+							self.input_rot.y += 10
+						case pg.K_KP7:
+							self.input_rot.x -= 10
+						case pg.K_KP9:
+							self.input_rot.x += 10
+				case pg.KEYDOWN:
+					match e.key:
+						case pg.K_w | pg.K_UP:
+							self.input_vel.z += 1
+						case pg.K_s | pg.K_DOWN:
+							self.input_vel.z -= 1
+						case pg.K_a | pg.K_LEFT:
+							self.input_vel.x += 1
+						case pg.K_d | pg.K_RIGHT:
+							self.input_vel.x -= 1
+						case pg.K_r | pg.K_SPACE:
+							self.input_vel.y += 1
+						case pg.K_f | pg.K_LCTRL:
+							self.input_vel.y -= 1
+						case pg.K_KP2:
+							self.input_rot.z += 10
+						case pg.K_KP8:
+							self.input_rot.z -= 10
+						case pg.K_KP4:
+							self.input_rot.y += 10
+						case pg.K_KP6:
+							self.input_rot.y -= 10
+						case pg.K_KP7:
+							self.input_rot.x += 10
+						case pg.K_KP9:
+							self.input_rot.x -= 10
+						case pg.K_TAB:
+							self.mouselook = not self.mouselook
+						case pg.K_ESCAPE:
+							self.running = False
+							return
 
-		# Ongoing events: Camera movement, camera rotation
-		if keys[pg.K_w]:
-			obj_cam.impulse(vec3(+d.x, +d.y, +d.z) * dh * units)
-		if keys[pg.K_s]:
-			obj_cam.impulse(vec3(-d.x, -d.y, -d.z) * dh * units)
-		if keys[pg.K_a]:
-			obj_cam.impulse(vec3(+d.z, 0, -d.x) * dh * units)
-		if keys[pg.K_d]:
-			obj_cam.impulse(vec3(-d.z, 0, +d.x) * dh * units)
-		if keys[pg.K_r] or keys[pg.K_SPACE]:
-			obj_cam.impulse(vec3(0, +1, 0) * dv * units_jump)
-		if keys[pg.K_f] or keys[pg.K_LCTRL]:
-			obj_cam.impulse(vec3(0, -1, 0) * dv * units_jump)
-		if keys[pg.K_UP]:
-			obj_cam.rotate(vec3(0, 0, +5) * units, data.settings.max_pitch)
-		if keys[pg.K_DOWN]:
-			obj_cam.rotate(vec3(0, 0, -5) * units, data.settings.max_pitch)
-		if keys[pg.K_LEFT]:
-			obj_cam.rotate(vec3(0, +5, 0) * units, data.settings.max_pitch)
-		if keys[pg.K_RIGHT]:
-			obj_cam.rotate(vec3(0, -5, 0) * units, data.settings.max_pitch)
-		if keys[pg.K_LEFTBRACKET]:
-			obj_cam.rotate(vec3(-5, 0, 0) * units, data.settings.max_pitch)
-		if keys[pg.K_RIGHTBRACKET]:
-			obj_cam.rotate(vec3(+5, 0, 0) * units, data.settings.max_pitch)
+		# Apply movement if any direction is desired
+		if self.input_vel != 0:
+			speed = 2 if mods & pg.KMOD_SHIFT else 1
+
+			if self.input_vel.x:
+				unit = data.settings.speed_move * speed * time
+				dir_right = self.cam.rot.vec_right()
+				if data.settings.max_pitch:
+					dir_right *= vec3(1, 0, 1)
+					dir_right = dir_right.normalize()
+				obj_main.accelerate(dir_right * max(-1, min(+1, self.input_vel.x)) * unit)
+
+			if self.input_vel.y:
+				unit = data.settings.speed_jump / (1 + time)
+				dir_up = self.cam.rot.vec_up()
+				if data.settings.max_pitch:
+					dir_up *= vec3(0, 1, 0)
+					dir_up = dir_up.normalize()
+				obj_main.accelerate(dir_up * max(-1, min(+1, self.input_vel.y)) * unit)
+
+			if self.input_vel.z:
+				unit = data.settings.speed_move * speed * time
+				dir_forward = self.cam.rot.vec_forward()
+				if data.settings.max_pitch:
+					dir_forward *= vec3(1, 0, 1)
+					dir_forward = dir_forward.normalize()
+				obj_main.accelerate(dir_forward * max(-1, min(+1, self.input_vel.z)) * unit)
+
+		# Apply rotation if any direction is desired, limit the roll and pitch of the camera to safe settings
+		if self.input_rot != 0 or mouse_rot != 0:
+			unit_key = data.settings.speed_move * time
+			unit_mouse = data.settings.speed_mouse / (1 + time * 1000)
+			rot = self.input_rot * unit_key + vec3(0, +mouse_rot.x, -mouse_rot.y) * unit_mouse
+			obj_main.rotate(rot)
+
+			if data.settings.max_roll:
+				roll_min = max(180, 360 - data.settings.max_roll)
+				roll_max = min(180, data.settings.max_roll)
+				obj_main.rot.x = roll_max if obj_main.rot.x > roll_max and obj_main.rot.x <= 180 else obj_main.rot.x
+				obj_main.rot.x = roll_min if obj_main.rot.x < roll_min and obj_main.rot.x > 180 else obj_main.rot.x
+
+			if data.settings.max_pitch:
+				pitch_min = max(180, 360 - data.settings.max_pitch)
+				pitch_max = min(180, data.settings.max_pitch)
+				obj_main.rot.z = pitch_max if obj_main.rot.z > pitch_max and obj_main.rot.z <= 180 else obj_main.rot.z
+				obj_main.rot.z = pitch_min if obj_main.rot.z < pitch_min and obj_main.rot.z > 180 else obj_main.rot.z
 
 	# Get the LOD level of a chunk based on its distance to the camera position
 	def chunk_lod(self, pos: vec3):
@@ -342,60 +421,69 @@ class Window:
 			del self.chunks[post]
 
 	# Compile a new list of chunks to be used by the renderer, chunks are only recalculated based on the update timer
+	# If culling is enabled only chunks that were traversed are recalculated, other chunks that require update will wait until being viewed
 	def chunk_update(self, time: float):
 		self.timer += time
 		if self.timer >= data.settings.chunk_time:
 			self.timer -= max(data.settings.chunk_time, time)
+			traversed = unpack(self.traversed)
 
 			# Scan existing chunks and check if their LOD changed, force recalculation if so
 			for post, frame in self.chunks.items():
-				pos_min = vec3(post[0], post[1], post[2])
-				if not pos_min in data.objects_chunks_update and self.chunk_lod(pos_min + data.settings.chunk_radius) != frame.lod:
-					data.objects_chunks_update.append(pos_min)
+				if not data.settings.culling or post in traversed:
+					pos = vec3(post[0], post[1], post[2])
+					if not pos in data.objects_chunks_update and self.chunk_lod(pos + data.settings.chunk_radius) != frame.lod:
+						data.objects_chunks_update.append(post)
 
 			# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
-			for pos_min in data.objects_chunks_update:
-				pos_max = pos_min + data.settings.chunk_size
-				lod = self.chunk_lod(pos_min + data.settings.chunk_radius)
-				voxels = {}
-				for obj in data.objects:
-					if obj.visible and obj.intersects(pos_min, pos_max):
-						spr = obj.get_sprite()
-						for x in range(pos_min.x, pos_max.x, lod):
-							for y in range(pos_min.y, pos_max.y, lod):
-								for z in range(pos_min.z, pos_max.z, lod):
-									pos = vec3(x, y, z)
-									if obj.intersects(pos, pos):
-										mat = spr.get_voxel(None, pos - obj.mins, obj.rot)
-										if mat:
-											pos_chunk = pos - pos_min
-											post_chunk = pos_chunk.tuple()
-											voxels[post_chunk] = mat
-				self.chunk_set(pos_min, voxels, lod)
-			data.objects_chunks_update = []
-		self.cam.chunk_assign(self.chunks, unpack(self.traversed))
+			for post in list(data.objects_chunks_update):
+				if not data.settings.culling or post in traversed:
+					pos_min = vec3(post[0], post[1], post[2])
+					pos_max = pos_min + data.settings.chunk_size
+					lod = self.chunk_lod(pos_min + data.settings.chunk_radius)
+					voxels = {}
+					for obj in data.objects:
+						if obj.visible and obj.intersects(pos_min, pos_max):
+							spr = obj.get_sprite()
+							for x in range(pos_min.x, pos_max.x, lod):
+								for y in range(pos_min.y, pos_max.y, lod):
+									for z in range(pos_min.z, pos_max.z, lod):
+										pos = vec3(x, y, z)
+										if obj.intersects(pos, pos):
+											mat = spr.get_voxel(None, pos - obj.mins, obj.rot)
+											if mat:
+												pos_chunk = pos - pos_min
+												post_chunk = pos_chunk.tuple()
+												voxels[post_chunk] = mat
+					self.chunk_set(pos_min, voxels, lod)
+					data.objects_chunks_update.remove(post)
+
+			# Clear the old chunks from the camera and set new ones that will be used during ray tracing
+			self.cam.chunk_clear()
+			for post in self.chunks:
+				if not data.settings.culling or post in traversed:
+					self.cam.chunk_set(post, self.chunks[post])
 
 	# Main loop of the Pygame window, apply input then execute the update functions of objects in the scene and request redrawing when the window is focused
 	def update(self):
-		obj_cam = None
-		for obj_cam in data.objects:
-			if obj_cam.cam_pos:
+		obj_main = None
+		for obj_main in data.objects:
+			if obj_main.cam_vec:
 				break
-		if not obj_cam or not obj_cam.cam_pos:
+		if not obj_main or not obj_main.cam_vec:
 			print("Error: No camera object found, define at least one object with a camera in the scene.")
 			self.running = False
 			return
 
 		time = self.clock.get_time() / 1000
-		self.input(obj_cam, time)
+		self.input(obj_main, time)
 		for obj in data.objects:
 			obj.update(self.cam.pos)
 
 		if pg.mouse.get_focused():
-			d = self.cam.rot.vec_forward()
 			self.iris = mix(self.iris, self.iris_target * data.settings.iris, data.settings.iris_time * time)
-			self.cam.pos = obj_cam.pos + vec3(obj_cam.cam_pos.x * d.x, obj_cam.cam_pos.y, obj_cam.cam_pos.x * d.z)
-			self.cam.rot = obj_cam.rot.quaternion()
+			self.cam.pos = obj_main.cam_pos
+			self.cam.rot = obj_main.cam_rot
 			self.chunk_update(time)
 			self.draw()
 			pg.mouse.set_visible(not self.mouselook)
