@@ -11,7 +11,7 @@ class store:
 
 # Vector2: A 2D vector containing X, Y directions, typically used for pixel positions in screen
 class vec2:
-	__slots__ = ("x", "y")
+	__slots__ = "x", "y"
 
 	def __init__(self, x: float, y: float):
 		self.x = x
@@ -35,11 +35,23 @@ class vec2:
 		else:
 			return vec2(self.x * other, self.y * other)
 
+	def __pow__(self, other):
+		if isinstance(other, vec2):
+			return vec2(self.x ** other.x, self.y ** other.y)
+		else:
+			return vec2(self.x ** other, self.y ** other)
+
 	def __truediv__(self, other):
 		if isinstance(other, vec2):
 			return vec2(self.x / other.x, self.y / other.y)
 		else:
 			return vec2(self.x / other, self.y / other)
+
+	def __floordiv__(self, other):
+		if isinstance(other, vec2):
+			return vec2(self.x // other.x, self.y // other.y)
+		else:
+			return vec2(self.x // other, self.y // other)
 
 	def __eq__(self, other):
 		if isinstance(other, vec2):
@@ -152,7 +164,7 @@ class vec2:
 
 # Vector3: A 3D vector containing X, Y, Z directions, typically used for positions and rotations in world space
 class vec3:
-	__slots__ = ("x", "y", "z")
+	__slots__ = "x", "y", "z"
 
 	def __init__(self, x: float, y: float, z: float):
 		self.x = x
@@ -177,11 +189,23 @@ class vec3:
 		else:
 			return vec3(self.x * other, self.y * other, self.z * other)
 
+	def __pow__(self, other):
+		if isinstance(other, vec3):
+			return vec3(self.x ** other.x, self.y ** other.y, self.z ** other.z)
+		else:
+			return vec3(self.x ** other, self.y ** other, self.z ** other)
+
 	def __truediv__(self, other):
 		if isinstance(other, vec3):
 			return vec3(self.x / other.x, self.y / other.y, self.z / other.z)
 		else:
 			return vec3(self.x / other, self.y / other, self.z / other)
+
+	def __floordiv__(self, other):
+		if isinstance(other, vec3):
+			return vec3(self.x // other.x, self.y // other.y, self.z // other.z)
+		else:
+			return vec3(self.x // other, self.y // other, self.z // other)
 
 	def __eq__(self, other):
 		if isinstance(other, vec3):
@@ -315,7 +339,7 @@ class vec3:
 
 # Quaternion: A special vector used to store and handle quaternion rotations
 class quaternion:
-	__slots__ = ("x", "y", "z", "w")
+	__slots__ = "x", "y", "z", "w"
 
 	def __init__(self, x: float, y: float, z: float, w: float):
 		self.x = x
@@ -353,7 +377,7 @@ class quaternion:
 
 # RGB: Stores color in RGB format
 class rgb:
-	__slots__ = ("r", "g", "b")
+	__slots__ = "r", "g", "b"
 
 	def __init__(self, r: int, g: int, b: int):
 		self.r = r
@@ -423,26 +447,26 @@ def normalize(x, x_min, x_max):
 # Builtin material function, designed as a simplified PBR shader
 def material(ray, mat, settings):
 	# Color and energy absorption falloff based on the number of hits and global falloff setting
-	absorption = mat.absorption / ((1 + ray.bounces) ** (1 + settings.falloff))
+	absorption = min(1, mat.absorption / ((1 + ray.bounces) ** (1 + settings.falloff)))
 
 	# Color, energy: Translate the material's albedo and emission to ray color and energy, based on the ray's color absorption
-	# Life: Scale ray life with roughness, the rougher a material is the less future bounces will provide any noticeable detail
+	# Life: Scale ray life with absorption and roughness, the rougher or more absorbent a material is the less future bounces will provide noticeable detail
 	# Roughness: Velocity is randomized by the roughness value of the interaction, 0 is perfectly sharp while 1 can send the ray in almost any direction
 	# Bounces: Return the material absorption as the bounce amount, glass and fog have a lower probability of terminating rays sooner
 	ray.color = ray.color.mix(mat.albedo, absorption)
 	ray.energy = mix(ray.energy, mat.energy, absorption)
-	ray.life *= 1 - mat.roughness
+	ray.life *= 1 - (mat.roughness * absorption)
 	ray.vel += vec3(rand(mat.roughness), rand(mat.roughness), rand(mat.roughness))
 	return mat.absorption
 
 # Builtin background function, generates a simple sky
 def material_background(ray, settings):
 	# Color and energy absorption falloff based on the number of hits and global falloff setting
-	absorption = 1 / ((1 + ray.bounces) ** (1 + settings.falloff))
+	absorption = min(1, 1 / ((1 + ray.bounces) ** (1 + settings.falloff)))
 
 	# Apply sky color and energy to the ray
 	color = rgb(127, 127 + max(0, +ray.vel.y) * 64, 127 + max(0, +ray.vel.y) * 128)
-	energy = 1 + max(0, +ray.vel.y) * 1
+	energy = 1 + max(0, +ray.vel.y)
 	ray.color = ray.color.mix(color, absorption)
 	ray.energy = mix(ray.energy, energy, absorption)
 

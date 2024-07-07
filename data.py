@@ -6,6 +6,7 @@ import configparser
 import importlib
 import copy
 import math
+import random
 
 import pygame as pg
 
@@ -58,8 +59,8 @@ settings = store(
 	max_roll = cfg.getfloat("PHYSICS", "max_roll") or 0,
 	dist_move = cfg.getint("PHYSICS", "dist_move") or 0,
 )
-settings.window = (settings.width, settings.height)
-settings.window_scaled = (settings.window[0] * settings.scale, settings.window[1] * settings.scale)
+settings.window = settings.width, settings.height
+settings.window_scaled = settings.window[0] * settings.scale, settings.window[1] * settings.scale
 settings.proportions = ((settings.width + settings.height) / 2) / max(settings.width, settings.height)
 settings.chunk_time = settings.chunk_rate / 1000
 settings.chunk_radius = round(settings.chunk_size / 2)
@@ -74,8 +75,7 @@ for x in range(settings.width):
 		settings.pixels[t].append((x, y))
 
 # Variables for global instances such as objects and chunk updates, accessed by the window and camera
-objects = []
-objects_chunks_update = []
+objects = {}
 player = None
 background = None
 
@@ -103,24 +103,36 @@ class Frame:
 		self.data3 = {}
 		self.data6 = {}
 
+	# Clear all voxels from the frame
 	def clear(self):
 		self.data3 = {}
 		self.data6 = {}
 
-	# Get all voxels from the frame, copies data3 as is then adds every point within data6
+	# Mix the voxels of another frame into this frame
+	def mix(self, other, force: bool):
+		voxels = other.get_voxels()
+		self.set_voxels(voxels, force)
+
+	# Get all voxels from the frame
 	def get_voxels(self):
-		items = dict(self.data3)
+		voxels = {}
+		for post3, mat in self.data3.items():
+			for x in range(post3[0] * self.lod, post3[0] * self.lod + self.lod):
+				for y in range(post3[1] * self.lod, post3[1] * self.lod + self.lod):
+					for z in range(post3[2] * self.lod, post3[2] * self.lod + self.lod):
+						post = x, y, z
+						voxels[post] = mat
 		for post6, mat in self.data6.items():
-			for x in range(post6[0], post6[3] + 1):
-				for y in range(post6[1], post6[4] + 1):
-					for z in range(post6[2], post6[5] + 1):
-						post3 = (x, y, z)
-						items[post3] = mat
-		return items
+			for x in range(post6[0] * self.lod, post6[3] * self.lod + self.lod):
+				for y in range(post6[1] * self.lod, post6[4] * self.lod + self.lod):
+					for z in range(post6[2] * self.lod, post6[5] * self.lod + self.lod):
+						post = x, y, z
+						voxels[post] = mat
+		return voxels
 
 	# Get the voxel at this position from the frame, attempt to fetch by index from data3 followed by scanning data6 if not found
 	def get_voxel(self, pos: vec3):
-		pos = pos.snapped(self.lod) if self.lod > 1 else pos
+		pos = pos // self.lod if self.lod > 1 else pos
 		post3 = pos.tuple()
 		if post3 in self.data3:
 			return self.data3[post3]
@@ -130,71 +142,97 @@ class Frame:
 					return mat
 		return None
 
-	# Set a voxel at this position on the frame, unpack the affected area since its content will be changed
-	def set_voxel(self, pos: vec3, mat: Material):
-		pos = pos.snapped(self.lod) if self.lod > 1 else pos
-		self.unpack(pos)
-		post3 = pos.tuple()
-		if mat:
-			self.data3[post3] = mat
-		else:
-			del self.data3[post3]
-		self.pack()
+	# Set a voxel at this position on the frame
+	# Unpack the affected area since its content will be changed, ignore positions that aren't valid at the frame's LOD
+	def set_voxel(self, pos: vec3, mat: Material, force: bool):
+		if self.lod <= 1 or (not pos.x % self.lod and not pos.y % self.lod and not pos.z % self.lod):
+			pos = pos // self.lod if self.lod > 1 else pos
+			if force or not self.get_voxel(pos):
+				post3 = pos.tuple()
+				self.unpack(pos)
+				if mat:
+					self.data3[post3] = mat
+				else:
+					del self.data3[post3]
+				self.pack()
 
 	# Set a list of voxels provided in the same format as data3
-	def set_voxels(self, voxels: dict):
-		for post3, mat in voxels.items():
-			pos = vec3(post3[0], post3[1], post3[2])
-			pos = pos.snapped(self.lod) if self.lod > 1 else pos
-			self.unpack(pos)
-			if mat:
-				self.data3[post3] = mat
-			else:
-				del self.data3[post3]
+	# Unpack the affected area since its content will be changed, ignore positions that aren't valid at the frame's LOD
+	def set_voxels(self, voxels: dict, force: bool):
+		for post, mat in voxels.items():
+			if self.lod <= 1 or (not post[0] % self.lod and not post[1] % self.lod and not post[2] % self.lod):
+				pos = vec3(post[0], post[1], post[2])
+				if force or not self.get_voxel(pos):
+					pos = pos // self.lod if self.lod > 1 else pos
+					post3 = pos.tuple()
+					self.unpack(pos)
+					if mat:
+						self.data3[post3] = mat
+					else:
+						del self.data3[post3]
 		self.pack()
 
 	# Decompress boxes in data6 to points in data3, position determines which box was touched and needs to be unpacked
 	def unpack(self, pos: vec3):
-		for post6, mat in self.data6.items():
+		for post6, mat in dict(self.data6).items():
 			if pos.x >= post6[0] and pos.x <= post6[3] and pos.y >= post6[1] and pos.y <= post6[4] and pos.z >= post6[2] and pos.z <= post6[5]:
 				for x in range(post6[0], post6[3] + 1):
 					for y in range(post6[1], post6[4] + 1):
 						for z in range(post6[2], post6[5] + 1):
-							post3 = (x, y, z)
+							post3 = x, y, z
 							self.data3[post3] = mat
 				del self.data6[post6]
 				break
 
 	# Compress points in data3 to boxes in data6
+	# Search size increases by one unit on each axis as long as voxels of the same material fill each slice being checked
+	# Start scanning from the first valid voxel found, the search area expands from a line to a plane to a cube in order -X, +X, -Y, +Y, -Z, +Z
 	def pack(self):
 		pack = self.packed
 		while pack:
 			pack = False
-
-			# Find the first valid voxel to start scanning from, the search area expands from a line to a plane to a cube in reverse order of -X, +X, -Y, +Y, -Z, +Z
-			# Search size increases by one unit on each axis as long as voxels of the same material fill the new slice, remove each direction once we found its last full slice
 			for post3, mat in self.data3.items():
 				pos_min = pos_max = vec3(post3[0], post3[1], post3[2])
-				pos_dirs = [vec3(-1, 0, 0), vec3(+1, 0, 0), vec3(0, -1, 0), vec3(0, +1, 0), vec3(0, 0, -1), vec3(0, 0, +1)]
-				while pos_dirs:
-					pos_dir = pos_dirs[-1]
-					pos_slice_min = pos_min + pos_dir if pos_dir.x < 0 or pos_dir.y < 0 or pos_dir.z < 0 else pos_max
-					pos_slice_max = pos_max + pos_dir if pos_dir.x > 0 or pos_dir.y > 0 or pos_dir.z > 0 else pos_min
-					for x in range(pos_slice_min.x, pos_slice_max.x + 1):
-						for y in range(pos_slice_min.y, pos_slice_max.y + 1):
-							for z in range(pos_slice_min.z, pos_slice_max.z + 1):
-								post = (x, y, z)
+				i = 0
+				while i < 6:
+					pos = post6 = None
+					pos_i = i
+					match pos_i:
+						case 0:
+							pos = vec3(-1, 0, 0)
+							post6 = pos_min.x - 1, pos_min.y + 0, pos_min.z + 0, pos_min.x + 0, pos_max.y + 0, pos_max.z + 0
+						case 1:
+							pos = vec3(+1, 0, 0)
+							post6 = pos_max.x + 0, pos_min.y + 0, pos_min.z + 0, pos_max.x + 1, pos_max.y + 0, pos_max.z + 0
+						case 2:
+							pos = vec3(0, -1, 0)
+							post6 = pos_min.x + 0, pos_min.y - 1, pos_min.z + 0, pos_max.x + 0, pos_min.y + 0, pos_max.z + 0
+						case 3:
+							pos = vec3(0, +1, 0)
+							post6 = pos_min.x + 0, pos_max.y + 0, pos_min.z + 0, pos_max.x + 0, pos_max.y + 1, pos_max.z + 0
+						case 4:
+							pos = vec3(0, 0, -1)
+							post6 = pos_min.x + 0, pos_min.y + 0, pos_min.z - 1, pos_max.x + 0, pos_max.y + 0, pos_min.z + 0
+						case 5:
+							pos = vec3(0, 0, +1)
+							post6 = pos_min.x + 0, pos_min.y + 0, pos_max.z + 0, pos_max.x + 0, pos_max.y + 0, pos_max.z + 1
+					for x in range(post6[0], post6[3] + 1):
+						for y in range(post6[1], post6[4] + 1):
+							for z in range(post6[2], post6[5] + 1):
+								post = x, y, z
 								if not post in self.data3 or self.data3[post] != mat:
-									pos_dirs.pop(-1)
-								if not pos_dir in pos_dirs:
+									i += 1
+								if i != pos_i:
 									break
-							if not pos_dir in pos_dirs:
+							if i != pos_i:
 								break
-						if not pos_dir in pos_dirs:
+						if i != pos_i:
 							break
-					if pos_dir in pos_dirs:
-						pos_min += pos_dir.min(0)
-						pos_max += pos_dir.max(0)
+					if i == pos_i:
+						if pos.x < 0 or pos.y < 0 or pos.z < 0:
+							pos_min += pos
+						else:
+							pos_max += pos
 
 				# If an area larger than a point exists, remove single voxels from data3 and define them as boxes in data6
 				# The contents of data3 will be modified and are no longer valid this turn, stop the current search and tell the main loop to run again
@@ -202,9 +240,8 @@ class Frame:
 					for x in range(pos_min.x, pos_max.x + 1):
 						for y in range(pos_min.y, pos_max.y + 1):
 							for z in range(pos_min.z, pos_max.z + 1):
-								post = (x, y, z)
-								if post in self.data3:
-									del self.data3[post]
+								post = x, y, z
+								del self.data3[post]
 					post6 = pos_min.tuple() + pos_max.tuple()
 					self.data6[post6] = mat
 					pack = True
@@ -226,7 +263,20 @@ class Sprite:
 		self.frame = self.frame_time = self.frame_start = self.frame_end = 0
 		self.frames = []
 		for i in range(settings["frames"]):
-			self.frames.append(Frame(packed = True, lod = self.lod))
+			self.frames.append(Frame(packed = False, lod = self.lod))
+
+	# Import from text file, Y and Z are flipped to match the engine's coordinate system
+	def from_text(self, files: list, materials: dict):
+		for frame in range(min(len(files), len(self.frames))):
+			text = open(files[frame], "r")
+			voxels = {}
+			for line in text:
+				params = line.strip().split(" ")
+				if params[0].isdigit() and params[1].isdigit() and params[2].isdigit() and params[3] in materials:
+					post = self.size.x - int(params[0]), int(params[2]), int(params[1])
+					mat = materials[params[3]]
+					voxels[post] = mat
+			self.get_frame(frame).set_voxels(voxels, True)
 
 	# Create a copy of this sprite that can be edited independently
 	def copy(self):
@@ -248,7 +298,7 @@ class Sprite:
 	# Mix another sprite of the same size into the given sprite, None ignores changes so empty spaces don't override
 	# If the frame count of either sprite is shorter, only the amount of sprites that correspond will be mixed
 	# This operation is only supported if the X Y Z axes of the sprite are all equal, meshes of unequal size can't be mixed
-	def mix(self, other):
+	def mix(self, other, force: bool):
 		if self.size.x != other.size.x or self.size.y != other.size.y or self.size.z != other.size.z:
 			print("Warning: Can't mix sprites of uneven size, " + str(self.size) + " and " + str(other.size) + " are not equal.")
 			return
@@ -258,47 +308,7 @@ class Sprite:
 			for post, mat in frame.get_voxels().items():
 				if mat:
 					pos = vec3(post[0], post[1], post[2])
-					self.set_voxel(f, pos, mat)
-
-	# Get the relevant frame of the sprite, can be None to retreive the active frame instead of a specific frame
-	def get_frame(self, frame):
-		if isinstance(frame, int):
-			return self.frames[frame]
-		return self.frames[self.frame]
-
-	# Add or remove a voxel at a single position, can be None to clear the voxel
-	# Position is local to the object and starts from the minimum corner, each axis should range between 0 and self.size - 1
-	# The material applied to the voxel is copied to allow modifying properties per voxel without changing the original material definition
-	def set_voxel(self, frame: int, pos: vec3, mat: Material):
-		if pos.x < 0 or pos.x >= self.size.x or pos.y < 0 or pos.y >= self.size.y or pos.z < 0 or pos.z >= self.size.z:
-			print("Warning: Attempted to set voxel outside of object boundaries at position " + str(pos) + ".")
-			return
-
-		self.get_frame(frame).set_voxel(pos, mat)
-
-	# Set a list of voxels in which each item is a tuple of the form (position, material)
-	def set_voxels(self, frame: int, voxels: list):
-		for post, mat in voxels.items():
-			pos = vec3(post[0], post[1], post[2])
-			if pos.x < 0 or pos.x >= self.size.x or pos.y < 0 or pos.y >= self.size.y or pos.z < 0 or pos.z >= self.size.z:
-				print("Warning: Attempted to set voxel list containing voxels outside of object boundaries at position " + str(pos) + ".")
-				return
-
-		self.get_frame(frame).set_voxels(voxels)
-
-	# Fill the cubic area between min and max corners with the given material
-	def set_voxels_area(self, frame: int, pos_min: vec3, pos_max: vec3, mat: Material):
-		if pos_min.x < 0 or pos_max.x >= self.size.x or pos_min.y < 0 or pos_max.y >= self.size.y or pos_min.z < 0 or pos_max.z >= self.size.z:
-			print("Warning: Attempted to set voxel area outside of object boundaries between positions " + str(pos_min) + " and " + str(pos_max) + ".")
-			return
-
-		voxels = {}
-		for x in range(math.trunc(pos_min.x), math.trunc(pos_max.x + 1)):
-			for y in range(math.trunc(pos_min.y), math.trunc(pos_max.y + 1)):
-				for z in range(math.trunc(pos_min.z), math.trunc(pos_max.z + 1)):
-					post = (x, y, z)
-					voxels[post] = mat
-		self.get_frame(frame).set_voxels(voxels)
+					self.set_voxel(f, pos, mat, force)
 
 	# Flip the position at which the voxel is being fetched and return the modified position
 	# Allows reading a mirrored version of the sprite
@@ -350,6 +360,46 @@ class Sprite:
 
 		return pos
 
+	# Get the relevant frame of the sprite, can be None to retreive the active frame instead of a specific frame
+	def get_frame(self, frame):
+		if isinstance(frame, int):
+			return self.frames[frame]
+		return self.frames[self.frame]
+
+	# Add or remove a voxel at a single position, can be None to clear the voxel
+	# Position is local to the object and starts from the minimum corner, each axis should range between 0 and self.size - 1
+	# The material applied to the voxel is copied to allow modifying properties per voxel without changing the original material definition
+	def set_voxel(self, frame: int, pos: vec3, mat: Material, force: bool):
+		if pos.x < 0 or pos.x >= self.size.x or pos.y < 0 or pos.y >= self.size.y or pos.z < 0 or pos.z >= self.size.z:
+			print("Warning: Attempted to set voxel outside of object boundaries at position " + str(pos) + ".")
+			return
+
+		self.get_frame(frame).set_voxel(pos, mat, force)
+
+	# Set a list of voxels in which each item is a tuple of the form (position, material)
+	def set_voxels(self, frame: int, voxels: list):
+		for post, mat in voxels.items():
+			pos = vec3(post[0], post[1], post[2])
+			if pos.x < 0 or pos.x >= self.size.x or pos.y < 0 or pos.y >= self.size.y or pos.z < 0 or pos.z >= self.size.z:
+				print("Warning: Attempted to set voxel list containing voxels outside of object boundaries at position " + str(pos) + ".")
+				return
+
+		self.get_frame(frame).set_voxels(voxels, force)
+
+	# Fill the cubic area between min and max corners with the given material
+	def set_voxels_area(self, frame: int, pos_min: vec3, pos_max: vec3, mat: Material, force: bool):
+		if pos_min.x < 0 or pos_max.x >= self.size.x or pos_min.y < 0 or pos_max.y >= self.size.y or pos_min.z < 0 or pos_max.z >= self.size.z:
+			print("Warning: Attempted to set voxel area outside of object boundaries between positions " + str(pos_min) + " and " + str(pos_max) + ".")
+			return
+
+		voxels = {}
+		for x in range(math.trunc(pos_min.x), math.trunc(pos_max.x + 1)):
+			for y in range(math.trunc(pos_min.y), math.trunc(pos_max.y + 1)):
+				for z in range(math.trunc(pos_min.z), math.trunc(pos_max.z + 1)):
+					post = x, y, z
+					voxels[post] = mat
+		self.get_frame(frame).set_voxels(voxels, force)
+
 	# Get the voxel at this position on the given frame, returns the material or None if empty or out of range
 	# Position is in local space, always convert the position to local coordinates before calling this
 	# The position is interpreted at the desired rotation, always provide the object rotation if this sprite belongs to an object
@@ -379,7 +429,9 @@ class Object:
 		self.physics = settings["physics"] if "physics" in settings else False
 		self.function = settings["function"] if  "function" in settings else None
 
+		self.id = random.getrandbits(64)
 		self.visible = False
+		self.redraw = True
 		self.size = self.mins = self.maxs = vec3(0, 0, 0)
 		self.weight = 0
 		self.sprite = None
@@ -387,29 +439,15 @@ class Object:
 		self.cam_pos = vec3(0, 0, 0)
 		self.cam_rot = quaternion(0, 0, 0, 0)
 		self.move(self.pos)
-		objects.append(self)
+		objects[self.id] = self
 
 	# Disable this object and remove it from the global object list
 	def remove(self):
-		self.area_update()
-		objects.remove(self)
+		del objects[self.id]
 
 	# Create a copy of this object that can be edited independently
 	def copy(self):
 		return copy.deepcopy(self)
-
-	# Mark that chunks touching the sprite of this object need to be recalculated by the renderer, used when the object's sprite or position changes
-	# If the object moved or its sprite size has changed, this must be ran both before and after the change as to refresh chunks in both cases
-	def area_update(self):
-		if self.mins < self.maxs:
-			pos_min = self.mins.snapped(settings.chunk_size)
-			pos_max = self.maxs.snapped(settings.chunk_size)
-			for x in range(pos_min.x, pos_max.x + 1, settings.chunk_size):
-				for y in range(pos_min.y, pos_max.y + 1, settings.chunk_size):
-					for z in range(pos_min.z, pos_max.z + 1, settings.chunk_size):
-						post = (x, y, z)
-						if not post in objects_chunks_update:
-							objects_chunks_update.append(post)
 
 	# Check whether another item intersects the bounding box of this object, pos_min and pos_max represent the corners of another box or a point if identical
 	def intersects(self, pos_min: vec3, pos_max: vec3):
@@ -427,17 +465,16 @@ class Object:
 			angle_y_new = round(self.rot.y / 90) % 4
 			angle_z_new = round(self.rot.z / 90) % 4
 			if angle_x_new != angle_x_old or angle_y_new != angle_y_old or angle_z_new != angle_z_old:
-				self.area_update()
+				self.redraw = True
 			self.set_camera_pos()
 
 	# Teleport the object to this origin, use only when necessary and prefer impulse instead
 	def move(self, pos):
 		if pos != self.pos:
-			self.area_update()
 			self.pos = pos
 			self.mins = math.trunc(self.pos) - self.size
 			self.maxs = math.trunc(self.pos) + self.size
-			self.area_update()
+			self.redraw = True
 			self.set_camera_pos()
 
 	# Add velocity to this object, 1 is the maximum speed allowed for objects
@@ -466,7 +503,7 @@ class Object:
 				if not pos_dir.x * self.vel.x > 0 and not pos_dir.y * self.vel.y > 0 and not pos_dir.z * self.vel.z > 0:
 					del pos_dirs[post3_dir]
 				else:
-					for obj in objects:
+					for obj in objects.values():
 						if obj != self and obj.visible and obj.intersects(vec3(post6[0], post6[1], post6[2]), vec3(post6[3], post6[4], post6[5])):
 							# If we're colliding with another physical object, transfer velocity based on weight difference and projectile speed
 							if obj.physics:
@@ -516,22 +553,24 @@ class Object:
 	# Update this object, called by the window every frame
 	# An immediate renderer update is issued when the object changes visibility or the sprite animation advances
 	def update(self, pos_cam: vec3):
+		dist = self.pos.distance(pos_cam)
+
 		# Determine object visibility based on available sprites and the object's distance to the camera
 		visible_old = self.visible
-		self.visible = self.sprite and self.pos.distance(pos_cam) <= settings.dist_max + self.size.maxs()
+		self.visible = self.sprite and dist <= settings.dist_max + self.size.maxs()
 		visible_new = self.visible
 		if visible_old != visible_new:
-			self.area_update()
+			self.redraw = True
 
 		# Update the animation frame and calculate physics based on the new sprite, limited by the physics sleep distance setting
-		if self.visible and self.pos.distance(pos_cam) <= settings.dist_move:
+		if self.visible and dist <= settings.dist_move:
 			spr = self.get_sprite()
 			frame_old = spr.frame
 			spr.anim_update()
 			frame_new = spr.frame
 			if frame_old != frame_new:
+				self.redraw = True
 				self.set_weight()
-				self.area_update()
 
 			if self.physics:
 				self.update_physics()
@@ -541,15 +580,14 @@ class Object:
 	# Set a sprite as the active sprite, None removes the sprite and disables the object
 	# Set the size and bounding box of the object to that of its sprite, or a point if the sprite is disabled
 	def set_sprite(self, sprite):
-		self.area_update()
 		self.size = self.mins = self.maxs = vec3(0, 0, 0)
 		if sprite:
 			self.sprite = sprite
 			self.size = math.trunc(self.sprite.size / 2)
 			self.mins = math.trunc(self.pos) - self.size
 			self.maxs = math.trunc(self.pos) + self.size
+		self.redraw = True
 		self.set_weight()
-		self.area_update()
 
 	# Get the sprite assigned to this object
 	# Use the angles of this object when fetching voxels from the sprite to get the correct rotation

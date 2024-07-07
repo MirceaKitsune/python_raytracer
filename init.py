@@ -17,13 +17,12 @@ class Camera:
 		self.lens = data.settings.fov * math.pi / 8
 		self.chunks = {}
 
-	# Clear all chunks from the camera
-	def chunk_clear(self):
-		self.chunks = {}
-
-	# Add a new chunk frame to the camera at this position
-	def chunk_set(self, post: tuple, chunk: data.Frame):
-		self.chunks[post] = chunk
+	# Add or clear a camera chunk frame at this position
+	def chunk_set(self, post: tuple, chunk):
+		if chunk:
+			self.chunks[post] = chunk
+		elif post in self.chunks:
+			del self.chunks[post]
 
 	# Get the frame of the chunk touched by this position if one exists
 	def chunk_get(self, pos: vec3):
@@ -65,7 +64,7 @@ class Camera:
 		# Note that diagonal steps are allowed and the ray can penetrate 1 voxel thick corners, checking in a stair pattern isn't supported due to performance
 		# The ray also returns the positions of chunks it traveled through which is used for occlusion culling
 		while ray.step < ray.life:
-			if ray.pos.x < chunk_min.x or ray.pos.y < chunk_min.y or ray.pos.z < chunk_min.z or ray.pos.x > chunk_max.x or ray.pos.y > chunk_max.y or ray.pos.z > chunk_max.z:
+			if not ray.pos >= chunk_min or not ray.pos <= chunk_max:
 				chunk_min = ray.pos.snapped(data.settings.chunk_size)
 				chunk_max = chunk_min + data.settings.chunk_size
 				post_chunk = chunk_min.tuple()
@@ -74,7 +73,7 @@ class Camera:
 					ray.traversed.append(post_chunk)
 
 			if chunk:
-				pos = math.trunc(ray.pos - ray.pos.snapped(data.settings.chunk_size))
+				pos = math.floor(ray.pos)
 				mat = chunk.get_voxel(pos)
 				if mat:
 					# Call the material function and obtain the bounce amount, add it to the total number of bounces
@@ -95,9 +94,9 @@ class Camera:
 						ray_pos_x = ray.pos + vec3(1, 0, 0) if ray.vel.x < direction else ray.pos - vec3(1, 0, 0)
 						ray_pos_y = ray.pos + vec3(0, 1, 0) if ray.vel.y < direction else ray.pos - vec3(0, 1, 0)
 						ray_pos_z = ray.pos + vec3(0, 0, 1) if ray.vel.z < direction else ray.pos - vec3(0, 0, 1)
-						pos_x = math.trunc(ray_pos_x - ray_pos_x.snapped(data.settings.chunk_size))
-						pos_y = math.trunc(ray_pos_y - ray_pos_y.snapped(data.settings.chunk_size))
-						pos_z = math.trunc(ray_pos_z - ray_pos_z.snapped(data.settings.chunk_size))
+						pos_x = math.floor(ray_pos_x)
+						pos_y = math.floor(ray_pos_y)
+						pos_z = math.floor(ray_pos_z)
 						chunk_x = chunk if ray_pos_x >= chunk_min and ray_pos_x <= chunk_max else self.chunk_get(ray_pos_x)
 						chunk_y = chunk if ray_pos_y >= chunk_min and ray_pos_y <= chunk_max else self.chunk_get(ray_pos_y)
 						chunk_z = chunk if ray_pos_z >= chunk_min and ray_pos_z <= chunk_max else self.chunk_get(ray_pos_z)
@@ -163,6 +162,7 @@ class Window:
 		self.pool = mp.Pool(data.settings.threads)
 		self.cam = Camera()
 		self.chunks = {}
+		self.chunks_objects = {}
 		self.timer = 0
 		self.iris = self.iris_target = 0
 		self.mouselook = True
@@ -198,58 +198,61 @@ class Window:
 					return
 
 		# Start render threads that aren't busy
+		update = False
 		for t in range(len(self.busy)):
 			if not self.busy[t]:
-				self.busy[t] = True
+				self.busy[t] = update = True
 				self.pool.apply_async(self.cam.tile, args = (t, 0), callback = self.draw_tile)
 
-		# Color spill: Multiply the canvas with its average color
-		canvas = pg.Surface.copy(self.canvas)
-		color = pg.transform.average_color(canvas, consider_alpha = True)
-		if data.settings.spill:
-			fac = 255 - round(data.settings.spill * 255)
-			color_tint = (min(255, color[0] + fac), min(255, color[1] + fac), min(255, color[2] + fac), min(255, color[3] + fac))
-			canvas.fill(color_tint, special_flags = pg.BLEND_RGBA_MULT)
+		# Redraw the canvas if at least one thread produced a new pixel set
+		if update:
+			# Color spill: Multiply the canvas with its average color
+			canvas = pg.Surface.copy(self.canvas)
+			color = pg.transform.average_color(canvas, consider_alpha = True)
+			if data.settings.spill:
+				fac = 255 - round(data.settings.spill * 255)
+				color_tint = min(255, color[0] + fac), min(255, color[1] + fac), min(255, color[2] + fac), min(255, color[3] + fac)
+				canvas.fill(color_tint, special_flags = pg.BLEND_RGBA_MULT)
 
-		# Iris adaptation: Brighten or darken the canvas in contrast to its luminosity, a grayscale copy is added or subtracted, the mask is inverted based on the operation
-		if data.settings.iris and data.settings.iris_time:
-			col = 0 if self.iris > 0 else 255
-			mod = pg.BLEND_RGBA_ADD if self.iris > 0 else pg.BLEND_RGBA_SUB
-			fac = round(abs(self.iris * 255))
-			canvas_gray = pg.transform.grayscale(canvas)
-			canvas_mask = pg.Surface(data.settings.window, pg.SRCALPHA)
-			canvas_mask.fill((col, col, col, col), special_flags = 0)
-			canvas_mask.blit(canvas_gray, (0, 0), special_flags = mod)
-			canvas_mask.fill((fac, fac, fac, fac), special_flags = pg.BLEND_RGBA_MULT)
-			canvas.blit(canvas_mask, (0, 0), special_flags = mod)
-			self.iris_target = 1 - (max(color[0], color[1], color[2]) / 255) * 2
+			# Iris adaptation: Brighten or darken the canvas in contrast to its luminosity, a grayscale copy is added or subtracted, the mask is inverted based on the operation
+			if data.settings.iris and data.settings.iris_time:
+				col = 0 if self.iris > 0 else 255
+				mod = pg.BLEND_RGBA_ADD if self.iris > 0 else pg.BLEND_RGBA_SUB
+				fac = round(abs(self.iris * 255))
+				canvas_gray = pg.transform.grayscale(canvas)
+				canvas_mask = pg.Surface(data.settings.window, pg.SRCALPHA)
+				canvas_mask.fill((col, col, col, col), special_flags = 0)
+				canvas_mask.blit(canvas_gray, (0, 0), special_flags = mod)
+				canvas_mask.fill((fac, fac, fac, fac), special_flags = pg.BLEND_RGBA_MULT)
+				canvas.blit(canvas_mask, (0, 0), special_flags = mod)
+				self.iris_target = 1 - (max(color[0], color[1], color[2]) / 255) * 2
 
-		# Bloom: Duplicate the canvas, darken the copy to adjust intensity, downscale then upscale to blur, lighten the canvas with the result
-		if data.settings.bloom and data.settings.bloom_blur:
-			box = round(data.settings.window[0] / max(1, data.settings.bloom_blur)), round(data.settings.window[1] / max(1, data.settings.bloom_blur))
-			fac = round((1 - data.settings.bloom) * 255)
-			canvas_blur = pg.Surface.copy(canvas)
-			canvas_blur.fill((fac, fac, fac), special_flags = pg.BLEND_RGBA_SUB)
-			canvas_blur = pg.transform.smoothscale(canvas_blur, box)
-			canvas_blur = pg.transform.smoothscale(canvas_blur, data.settings.window)
-			canvas.blit(canvas_blur, (0, 0), special_flags = pg.BLEND_RGBA_ADD)
+			# Bloom: Duplicate the canvas, darken the copy to adjust intensity, downscale then upscale to blur, lighten the canvas with the result
+			if data.settings.bloom and data.settings.bloom_blur:
+				box = round(data.settings.window[0] / max(1, data.settings.bloom_blur)), round(data.settings.window[1] / max(1, data.settings.bloom_blur))
+				fac = round((1 - data.settings.bloom) * 255)
+				canvas_blur = pg.Surface.copy(canvas)
+				canvas_blur.fill((fac, fac, fac), special_flags = pg.BLEND_RGBA_SUB)
+				canvas_blur = pg.transform.smoothscale(canvas_blur, box)
+				canvas_blur = pg.transform.smoothscale(canvas_blur, data.settings.window)
+				canvas.blit(canvas_blur, (0, 0), special_flags = pg.BLEND_RGBA_ADD)
 
-		# Filter: Scale the canvas to the window resolution, smooth and sharp passes are alternated to achieve the selected pixel filter
-		# 0 = Fully sharp, 1 = Fully smooth, < 1 = Emulate subsampling, > 1 = Emulate supersampling
-		if data.settings.scale > 1:
-			func_scale_by = pg.transform.scale_by if data.settings.smooth > 1 else pg.transform.smoothscale_by
-			func_scale = pg.transform.scale if data.settings.smooth < 1 else pg.transform.smoothscale
-			if data.settings.smooth and data.settings.smooth != 1:
-				fac = 1 / (1 - data.settings.smooth) if data.settings.smooth < 1 else data.settings.smooth
-				canvas = func_scale_by(canvas, (fac, fac))
-			canvas = func_scale(canvas, data.settings.window_scaled)
+			# Filter: Scale the canvas to the window resolution, smooth and sharp passes are alternated to achieve the selected pixel filter
+			# 0 = Fully sharp, 1 = Fully smooth, < 1 = Emulate subsampling, > 1 = Emulate supersampling
+			if data.settings.scale > 1:
+				func_scale_by = pg.transform.scale_by if data.settings.smooth > 1 else pg.transform.smoothscale_by
+				func_scale = pg.transform.scale if data.settings.smooth < 1 else pg.transform.smoothscale
+				if data.settings.smooth and data.settings.smooth != 1:
+					fac = 1 / (1 - data.settings.smooth) if data.settings.smooth < 1 else data.settings.smooth
+					canvas = func_scale_by(canvas, (fac, fac))
+				canvas = func_scale(canvas, data.settings.window_scaled)
 
-		# Add the info text to the canvas, blit the canvas to the screen, update Pygame display
-		text_info = str(data.settings.width) + " x " + str(data.settings.height) + " (" + str(data.settings.width * data.settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(data.settings.fps) + " FPS"
-		text = self.font.render(text_info, True, (255, 255, 255))
-		self.screen.blit(canvas, (0, 0))
-		self.screen.blit(text, (0, 0))
-		pg.display.flip()
+			# Add the info text to the canvas, blit the canvas to the screen, update Pygame display
+			text_info = str(data.settings.width) + " x " + str(data.settings.height) + " (" + str(data.settings.width * data.settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(data.settings.fps) + " FPS"
+			text = self.font.render(text_info, True, (255, 255, 255))
+			self.screen.blit(canvas, (0, 0))
+			self.screen.blit(text, (0, 0))
+			pg.display.flip()
 
 	# Handle keyboard and mouse input, apply object movement and rotation for the main object
 	def input(self, time: float):
@@ -389,22 +392,6 @@ class Window:
 				data.player.rot.z = pitch_max if data.player.rot.z > pitch_max and data.player.rot.z <= 180 else data.player.rot.z
 				data.player.rot.z = pitch_min if data.player.rot.z < pitch_min and data.player.rot.z > 180 else data.player.rot.z
 
-	# Get the LOD level of a chunk based on its distance to the camera position
-	def chunk_lod(self, pos: vec3):
-		if data.settings.chunk_lod > 1:
-			lod = pos.distance(self.cam.pos) / (data.settings.dist_max / data.settings.chunk_lod)
-			return min(1 + math.trunc(lod), data.settings.chunk_lod)
-		return 1
-
-	# Create a new frame with this voxel list or delete the chunk if empty
-	def chunk_set(self, pos: vec3, voxels: dict, lod: int):
-		post = pos.tuple()
-		if voxels:
-			self.chunks[post] = data.Frame(packed = True, lod = lod)
-			self.chunks[post].set_voxels(voxels)
-		elif post in self.chunks:
-			del self.chunks[post]
-
 	# Compile a new list of chunks to be used by the renderer, chunks are only recalculated based on the update timer
 	# If culling is enabled only chunks that were traversed are recalculated, other chunks that require update will wait until being viewed
 	def chunk_update(self, time: float):
@@ -413,41 +400,64 @@ class Window:
 			self.timer -= max(data.settings.chunk_time, time)
 			traversed = unpack(self.traversed)
 
-			# Scan existing chunks and check if their LOD changed, force recalculation if so
-			for post, frame in self.chunks.items():
-				if not data.settings.culling or post in traversed:
-					pos = vec3(post[0], post[1], post[2])
-					if not pos in data.objects_chunks_update and self.chunk_lod(pos + data.settings.chunk_radius) != frame.lod:
-						data.objects_chunks_update.append(post)
-
-			# Compile a new voxel list for chunks that need to be redrawn, add intersecting voxels for every object touching this chunk
-			for post in list(data.objects_chunks_update):
-				if not data.settings.culling or post in traversed:
-					pos_min = vec3(post[0], post[1], post[2])
-					pos_max = pos_min + data.settings.chunk_size
-					lod = self.chunk_lod(pos_min + data.settings.chunk_radius)
-					voxels = {}
-					for obj in data.objects:
-						if obj.visible and obj.intersects(pos_min, pos_max):
-							spr = obj.get_sprite()
-							for x in range(pos_min.x, pos_max.x, lod):
-								for y in range(pos_min.y, pos_max.y, lod):
-									for z in range(pos_min.z, pos_max.z, lod):
-										pos = vec3(x, y, z)
-										if obj.intersects(pos, pos):
+			# Recalculate the frames of objects that require visual update, chunks that need to be updated are set to None
+			# An object's existing chunks are removed if the object was deleted or will be updated, new ones are then added if the object is visible
+			# Frames in object chunks are indexed by [object_id][position_chunk]
+			for obj_id in merge(data.objects.keys(), self.chunks_objects.keys()):
+				if obj_id in self.chunks_objects and (not obj_id in data.objects or data.objects[obj_id].redraw):
+					for post_chunk in self.chunks_objects[obj_id]:
+						self.chunks[post_chunk] = None
+					del self.chunks_objects[obj_id]
+				if obj_id in data.objects and data.objects[obj_id].redraw and data.objects[obj_id].visible:
+					obj = data.objects[obj_id]
+					obj.redraw = False
+					spr = obj.get_sprite()
+					chunk_min = obj.mins.snapped(data.settings.chunk_size)
+					chunk_max = obj.maxs.snapped(data.settings.chunk_size)
+					for chunk_x in range(chunk_min.x, chunk_max.x + 1, data.settings.chunk_size):
+						for chunk_y in range(chunk_min.y, chunk_max.y + 1, data.settings.chunk_size):
+							for chunk_z in range(chunk_min.z, chunk_max.z + 1, data.settings.chunk_size):
+								voxels = {}
+								pos_min = obj.mins.max(vec3(chunk_x, chunk_y, chunk_z))
+								pos_max = obj.maxs.min(vec3(chunk_x + data.settings.chunk_size, chunk_y + data.settings.chunk_size, chunk_z + data.settings.chunk_size))
+								post_chunk = chunk_x, chunk_y, chunk_z
+								self.chunks[post_chunk] = None
+								for x in range(pos_min.x, pos_max.x):
+									for y in range(pos_min.y, pos_max.y):
+										for z in range(pos_min.z, pos_max.z):
+											pos = vec3(x, y, z)
 											mat = spr.get_voxel(None, pos - obj.mins, obj.rot)
 											if mat:
-												pos_chunk = pos - pos_min
-												post_chunk = pos_chunk.tuple()
-												voxels[post_chunk] = mat
-					self.chunk_set(pos_min, voxels, lod)
-					data.objects_chunks_update.remove(post)
+												post = x, y, z
+												voxels[post] = mat
+								if voxels:
+									if not obj_id in self.chunks_objects:
+										self.chunks_objects[obj_id] = {}
+									self.chunks_objects[obj_id][post_chunk] = data.Frame(packed = True, lod = 1)
+									self.chunks_objects[obj_id][post_chunk].set_voxels(voxels, True)
 
-			# Clear the old chunks from the camera and set new ones that will be used during ray tracing
-			self.cam.chunk_clear()
-			for post in self.chunks:
-				if not data.settings.culling or post in traversed:
-					self.cam.chunk_set(post, self.chunks[post])
+			# Empty chunks were marked for recalculation, remove and create new frames from the combined voxels lists of all chunk if any voxel data is available
+			# Valid chunks are sent to the camera for rendering if a chunk is visible or occlusion culling is disabled
+			# Frames in chunks are indexed by [position_chunk][lod]
+			for post_chunk in list(self.chunks.keys()):
+				if not self.chunks[post_chunk]:
+					voxels = {}
+					for obj in self.chunks_objects.values():
+						if post_chunk in obj:
+							voxels |= obj[post_chunk].get_voxels()
+					if voxels:
+						self.chunks[post_chunk] = [None] * data.settings.chunk_lod
+						for lod in range(data.settings.chunk_lod):
+							self.chunks[post_chunk][lod] = data.Frame(packed = True, lod = lod + 1)
+							self.chunks[post_chunk][lod].set_voxels(voxels, True)
+					else:
+						del self.chunks[post_chunk]
+				if post_chunk in self.chunks and (not data.settings.culling or post_chunk in traversed):
+					pos = vec3(post_chunk[0], post_chunk[1], post_chunk[2]) + data.settings.chunk_radius
+					lod = min(math.trunc(pos.distance(self.cam.pos) / (data.settings.dist_max / data.settings.chunk_lod)), data.settings.chunk_lod - 1)
+					self.cam.chunk_set(post_chunk, self.chunks[post_chunk][lod])
+				else:
+					self.cam.chunk_set(post_chunk, None)
 
 	# Main loop of the Pygame window, apply input then execute the update functions of objects in the scene and request redrawing when the window is focused
 	def update(self):
@@ -456,7 +466,7 @@ class Window:
 			self.running = False
 			return
 
-		time = self.clock.get_time() / 1000
+		time = min(1, self.clock.get_time() / 1000)
 		if pg.mouse.get_focused():
 			self.iris = mix(self.iris, self.iris_target * data.settings.iris, data.settings.iris_time * time)
 			self.cam.pos = data.player.cam_pos
@@ -464,7 +474,7 @@ class Window:
 			self.draw()
 			self.chunk_update(time)
 			pg.mouse.set_visible(not self.mouselook)
-		for obj in data.objects:
+		for obj in data.objects.values():
 			obj.update(self.cam.pos)
 		self.input(time)
 
