@@ -36,7 +36,6 @@ settings = store(
 	chunk_size = cfg.getint("RENDER", "chunk_size") or 16,
 	chunk_lod = cfg.getint("RENDER", "chunk_lod") or 1,
 	dof = cfg.getfloat("RENDER", "dof") or 0,
-	batches = cfg.getint("RENDER", "batches") or 1,
 	dist_min = cfg.getint("RENDER", "dist_min") or 0,
 	dist_max = cfg.getint("RENDER", "dist_max") or 32,
 	max_light = cfg.getfloat("RENDER", "max_light") or 0,
@@ -59,22 +58,25 @@ settings = store(
 	max_roll = cfg.getfloat("PHYSICS", "max_roll") or 0,
 	dist_move = cfg.getint("PHYSICS", "dist_move") or 0,
 )
+settings.window = (settings.width, settings.height)
+settings.window_scaled = (settings.window[0] * settings.scale, settings.window[1] * settings.scale)
 settings.proportions = ((settings.width + settings.height) / 2) / max(settings.width, settings.height)
 settings.chunk_time = settings.chunk_rate / 1000
 settings.chunk_radius = round(settings.chunk_size / 2)
 
-# Obtain the number of tiles and store their bounding boxes as (x_min, y_min, x_max, y_max)
-tile_x, tile_y = grid(settings.threads)
-tile_x, tile_y = (tile_x, tile_y) if settings.width > settings.height else (tile_y, tile_x)
-settings.tile_size = math.trunc(settings.width // tile_x), math.trunc(settings.height // tile_y)
-settings.tile = []
-for x in range(tile_x):
-	for y in range(tile_y):
-		settings.tile.append((x * settings.tile_size[0], y * settings.tile_size[1], x * settings.tile_size[0] + settings.tile_size[0], y * settings.tile_size[1] + settings.tile_size[1]))
+# Obtain the (x, y) pixel positions for all pixels in the canvas and assign them to the appropriate thread for rendering
+settings.pixels = []
+for t in range(settings.threads):
+	settings.pixels.append([])
+for x in range(settings.width):
+	for y in range(settings.height):
+		t = (x ^ y) % settings.threads
+		settings.pixels[t].append((x, y))
 
 # Variables for global instances such as objects and chunk updates, accessed by the window and camera
 objects = []
 objects_chunks_update = []
+player = None
 background = None
 
 # Material: A subset of Frame, used to store the physical properties of a virtual atom
@@ -381,7 +383,9 @@ class Object:
 		self.size = self.mins = self.maxs = vec3(0, 0, 0)
 		self.weight = 0
 		self.sprite = None
-		self.cam_vec = self.cam_pos = self.cam_rot = None
+		self.cam_vec = vec2(0, 0)
+		self.cam_pos = vec3(0, 0, 0)
+		self.cam_rot = quaternion(0, 0, 0, 0)
 		self.move(self.pos)
 		objects.append(self)
 
@@ -424,8 +428,7 @@ class Object:
 			angle_z_new = round(self.rot.z / 90) % 4
 			if angle_x_new != angle_x_old or angle_y_new != angle_y_old or angle_z_new != angle_z_old:
 				self.area_update()
-			if self.cam_vec:
-				self.set_camera_pos()
+			self.set_camera_pos()
 
 	# Teleport the object to this origin, use only when necessary and prefer impulse instead
 	def move(self, pos):
@@ -435,8 +438,7 @@ class Object:
 			self.mins = math.trunc(self.pos) - self.size
 			self.maxs = math.trunc(self.pos) + self.size
 			self.area_update()
-			if self.cam_vec:
-				self.set_camera_pos()
+			self.set_camera_pos()
 
 	# Add velocity to this object, 1 is the maximum speed allowed for objects
 	def accelerate(self, vel):
@@ -563,20 +565,16 @@ class Object:
 
 	# Update the world camera position and rotation coordinates for camera objects
 	def set_camera_pos(self):
-		if self.cam_vec:
+		if self.cam_vec != 0:
 			self.cam_rot = self.rot.quaternion()
 			d = self.cam_rot.vec_forward()
 			self.cam_pos = self.pos + vec3(self.cam_vec.x * d.x, self.cam_vec.y, self.cam_vec.x * d.z)
-		else:
-			self.cam_pos = None
-			self.cam_rot = None
 
 	# Mark that we want to attach the camera to this object at the provided position offset
 	# The camera can only be attached to one object at a time, this will remove the setting from all other objects
 	def set_camera(self, pos: vec2):
-		for obj in objects:
-			obj.cam_vec = pos if obj == self else None
-			obj.set_camera_pos()
+		self.cam_vec = pos
+		self.set_camera_pos()
 
 # Execute the init script of the loaded mod
 importlib.import_module("mods." + mod + ".init")

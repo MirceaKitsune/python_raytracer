@@ -123,35 +123,32 @@ class Camera:
 
 	# Called by threads with a tile image to paint to, creates a new surface for this thread to paint to which is returned to the main thread as a byte string
 	# If static noise is enabled, the random seed is set to an index unique to this pixel and sample so noise in ray calculations is static instead of flickering
-	# The batch number decides which group of pixels should be rendered this call using a pattern generated from the 2D position of the pixel
 	# The alpha channel is used for motion blur, ray energy is translated to transparency which simulates a shutter making bright pixels stronger
-	def tile(self, image: str, thread: int, batch: int):
-		tile = pg.image.frombytes(image, data.settings.tile_size, "RGBA")
+	def tile(self, thread: int, t: int):
+		surface = pg.Surface(data.settings.window, pg.SRCALPHA)
 		traversed = []
-		box = data.settings.tile[thread]
-		for x in range(box[0], box[2]):
-			for y in range(box[1], box[3]):
-				if (x ^ y) % data.settings.batches == batch:
-					colors = []
-					dir_x = -1 + (x / data.settings.width) * 2
-					dir_y = -1 + (y / data.settings.height) * 2
-					detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
-					samples = max(1, round(data.settings.samples * detail))
-					for sample in range(samples):
-						if data.settings.static:
-							random.seed((1 + x) * (1 + y) * (1 + sample))
+		for x, y in data.settings.pixels[thread]:
+			colors = []
+			dir_x = -1 + (x / data.settings.width) * 2
+			dir_y = -1 + (y / data.settings.height) * 2
+			detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
+			samples = max(1, round(data.settings.samples * detail))
+			for sample in range(samples):
+				if data.settings.static:
+					random.seed((1 + x) * (1 + y) * (1 + sample))
 
-						ray_detail = detail / (1 + sample * data.settings.lod_samples) * (1 - data.settings.lod_random * random.random())
-						ray = self.trace(dir_x, dir_y, ray_detail)
-						alpha = round(min(1, ray.energy + data.settings.shutter) * 255)
-						colors.append(ray.color.array() + [alpha])
-						traversed = merge(traversed, ray.traversed)
+				ray_detail = detail / (1 + sample * data.settings.lod_samples) * (1 - data.settings.lod_random * random.random())
+				ray = self.trace(dir_x, dir_y, ray_detail)
+				alpha = round(min(1, ray.energy + data.settings.shutter) * 255)
+				colors.append(ray.color.array() + [alpha])
+				traversed = merge(traversed, ray.traversed)
 
-					color = average(colors)
-					tile.set_at((x - box[0], y - box[1]), (color[0], color[1], color[2], color[3]))
-					random.seed(None)
+			color = average(colors)
+			surface.set_at((x, y), (color[0], color[1], color[2], color[3]))
+			random.seed(None)
 
-		return pg.image.tobytes(tile, "RGBA"), traversed, thread
+		image = pg.image.tobytes(surface, "RGBA")
+		return image, traversed, thread
 
 # Window: Initializes Pygame and starts the main loop, handles all updates and redraws the canvas using a Camera instance
 class Window:
@@ -159,13 +156,11 @@ class Window:
 		# Configure Pygame and the main screen as well as the camera and thread pool that will be used to update the window
 		pg.init()
 		pg.display.set_caption("Voxel Tracer")
-		self.box = vec2(data.settings.width, data.settings.height)
-		self.box_win = self.box * data.settings.scale
-		self.screen = pg.display.set_mode(self.box_win.tuple())
-		self.canvas = pg.Surface(self.box.tuple(), pg.SRCALPHA)
+		self.screen = pg.display.set_mode(data.settings.window_scaled)
+		self.canvas = pg.Surface(data.settings.window, pg.SRCALPHA)
 		self.font = pg.font.SysFont(None, 24)
 		self.clock = pg.time.Clock()
-		self.pool = mp.Pool(processes = data.settings.threads)
+		self.pool = mp.Pool(data.settings.threads)
 		self.cam = Camera()
 		self.chunks = {}
 		self.timer = 0
@@ -174,13 +169,8 @@ class Window:
 		self.running = True
 		self.input_vel = vec3(0, 0, 0)
 		self.input_rot = vec3(0, 0, 0)
-
-		# Containers for items indexed by thread number
-		surface = pg.Surface(data.settings.tile_size, pg.SRCALPHA)
-		image = pg.image.tobytes(surface, "RGBA")
-		self.tiles = [image] * data.settings.threads
+		self.busy = [False] * data.settings.threads
 		self.traversed = [[]] * data.settings.threads
-		self.batches = [0] * data.settings.threads
 
 		# Main loop limited by FPS
 		while self.running:
@@ -193,81 +183,76 @@ class Window:
 
 	# Called by the thread pool on finish, adds the image to the appropriate thread for the main thread to mix
 	def draw_tile(self, result):
-		tile, traversed, thread = result
-		self.tiles[thread] = tile
+		image, traversed, thread = result
+		surface = pg.image.frombytes(image, data.settings.window, "RGBA")
+		self.canvas.blit(surface, (0, 0))
 		self.traversed[thread] = traversed
-		self.batches[thread] = (self.batches[thread] + 1) % data.settings.batches
+		self.busy[thread] = False
 
 	# Request the camera to draw a new tile for each thread
 	def draw(self):
 		# If sync is enabled, skip updates until all tiles have finished
 		if data.settings.sync:
-			for tile in self.tiles:
-				if not tile:
+			for t in range(len(self.busy)):
+				if self.busy[t]:
 					return
 
-		# Add available tiles to the canvas with performance information on top
-		tiles = []
-		for t in range(len(self.tiles)):
-			if self.tiles[t]:
-				box = data.settings.tile[t]
-				tile = pg.image.frombytes(self.tiles[t], data.settings.tile_size, "RGBA")
-				tiles.append((tile, (box[0], box[1])))
-				self.pool.apply_async(self.cam.tile, args = (self.tiles[t], t, self.batches[t]), callback = self.draw_tile)
-				self.tiles[t] = None
-		if tiles:
-			self.canvas.blits(tiles)
-			canvas = pg.Surface.copy(self.canvas)
-			color = pg.transform.average_color(canvas, consider_alpha = True)
+		# Start render threads that aren't busy
+		for t in range(len(self.busy)):
+			if not self.busy[t]:
+				self.busy[t] = True
+				self.pool.apply_async(self.cam.tile, args = (t, 0), callback = self.draw_tile)
 
-			# Color spill: Multiply the canvas with its average color
-			if data.settings.spill:
-				fac = 255 - round(data.settings.spill * 255)
-				color_tint = (min(255, color[0] + fac), min(255, color[1] + fac), min(255, color[2] + fac), min(255, color[3] + fac))
-				canvas.fill(color_tint, special_flags = pg.BLEND_RGBA_MULT)
+		# Color spill: Multiply the canvas with its average color
+		canvas = pg.Surface.copy(self.canvas)
+		color = pg.transform.average_color(canvas, consider_alpha = True)
+		if data.settings.spill:
+			fac = 255 - round(data.settings.spill * 255)
+			color_tint = (min(255, color[0] + fac), min(255, color[1] + fac), min(255, color[2] + fac), min(255, color[3] + fac))
+			canvas.fill(color_tint, special_flags = pg.BLEND_RGBA_MULT)
 
-			# Iris adaptation: Brighten or darken the canvas in contrast to its luminosity, a grayscale copy is added or subtracted, the mask is inverted based on the operation
-			if data.settings.iris and data.settings.iris_time:
-				col = 0 if self.iris > 0 else 255
-				mod = pg.BLEND_RGBA_ADD if self.iris > 0 else pg.BLEND_RGBA_SUB
-				fac = round(abs(self.iris * 255))
-				canvas_gray = pg.transform.grayscale(canvas)
-				canvas_mask = pg.Surface(self.box.tuple(), pg.SRCALPHA)
-				canvas_mask.fill((col, col, col, col), special_flags = 0)
-				canvas_mask.blit(canvas_gray, (0, 0), special_flags = mod)
-				canvas_mask.fill((fac, fac, fac, fac), special_flags = pg.BLEND_RGBA_MULT)
-				canvas.blit(canvas_mask, (0, 0), special_flags = mod)
-				self.iris_target = 1 - (max(color[0], color[1], color[2]) / 255) * 2
+		# Iris adaptation: Brighten or darken the canvas in contrast to its luminosity, a grayscale copy is added or subtracted, the mask is inverted based on the operation
+		if data.settings.iris and data.settings.iris_time:
+			col = 0 if self.iris > 0 else 255
+			mod = pg.BLEND_RGBA_ADD if self.iris > 0 else pg.BLEND_RGBA_SUB
+			fac = round(abs(self.iris * 255))
+			canvas_gray = pg.transform.grayscale(canvas)
+			canvas_mask = pg.Surface(data.settings.window, pg.SRCALPHA)
+			canvas_mask.fill((col, col, col, col), special_flags = 0)
+			canvas_mask.blit(canvas_gray, (0, 0), special_flags = mod)
+			canvas_mask.fill((fac, fac, fac, fac), special_flags = pg.BLEND_RGBA_MULT)
+			canvas.blit(canvas_mask, (0, 0), special_flags = mod)
+			self.iris_target = 1 - (max(color[0], color[1], color[2]) / 255) * 2
 
-			# Bloom: Duplicate the canvas, darken the copy to adjust intensity, downscale then upscale to blur, lighten the canvas with the result
-			if data.settings.bloom and data.settings.bloom_blur:
-				box = round(self.box / max(1, data.settings.bloom_blur))
-				fac = round((1 - data.settings.bloom) * 255)
-				canvas_blur = pg.Surface.copy(canvas)
-				canvas_blur.fill((fac, fac, fac), special_flags = pg.BLEND_RGBA_SUB)
-				canvas_blur = pg.transform.smoothscale(canvas_blur, box.tuple())
-				canvas_blur = pg.transform.smoothscale(canvas_blur, self.box.tuple())
-				canvas.blit(canvas_blur, (0, 0), special_flags = pg.BLEND_RGBA_ADD)
+		# Bloom: Duplicate the canvas, darken the copy to adjust intensity, downscale then upscale to blur, lighten the canvas with the result
+		if data.settings.bloom and data.settings.bloom_blur:
+			box = round(data.settings.window[0] / max(1, data.settings.bloom_blur)), round(data.settings.window[1] / max(1, data.settings.bloom_blur))
+			fac = round((1 - data.settings.bloom) * 255)
+			canvas_blur = pg.Surface.copy(canvas)
+			canvas_blur.fill((fac, fac, fac), special_flags = pg.BLEND_RGBA_SUB)
+			canvas_blur = pg.transform.smoothscale(canvas_blur, box)
+			canvas_blur = pg.transform.smoothscale(canvas_blur, data.settings.window)
+			canvas.blit(canvas_blur, (0, 0), special_flags = pg.BLEND_RGBA_ADD)
 
-			# Filter: Scale the canvas to the window resolution, smooth and sharp passes are alternated to achieve the selected pixel filter
-			# 0 = Fully sharp, 1 = Fully smooth, < 1 = Emulate subsampling, > 1 = Emulate supersampling
-			if data.settings.scale > 1:
-				func_scale_by = pg.transform.scale_by if data.settings.smooth > 1 else pg.transform.smoothscale_by
-				func_scale = pg.transform.scale if data.settings.smooth < 1 else pg.transform.smoothscale
-				if data.settings.smooth and data.settings.smooth != 1:
-					fac = 1 / (1 - data.settings.smooth) if data.settings.smooth < 1 else data.settings.smooth
-					canvas = func_scale_by(canvas, (fac, fac))
-				canvas = func_scale(canvas, self.box_win.tuple())
+		# Filter: Scale the canvas to the window resolution, smooth and sharp passes are alternated to achieve the selected pixel filter
+		# 0 = Fully sharp, 1 = Fully smooth, < 1 = Emulate subsampling, > 1 = Emulate supersampling
+		if data.settings.scale > 1:
+			func_scale_by = pg.transform.scale_by if data.settings.smooth > 1 else pg.transform.smoothscale_by
+			func_scale = pg.transform.scale if data.settings.smooth < 1 else pg.transform.smoothscale
+			if data.settings.smooth and data.settings.smooth != 1:
+				fac = 1 / (1 - data.settings.smooth) if data.settings.smooth < 1 else data.settings.smooth
+				canvas = func_scale_by(canvas, (fac, fac))
+			canvas = func_scale(canvas, data.settings.window_scaled)
 
-			# Add the info text to the canvas, blit the canvas to the screen, update Pygame display
-			text_info = str(data.settings.width) + " x " + str(data.settings.height) + " (" + str(data.settings.width * data.settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(data.settings.fps) + " FPS"
-			text = self.font.render(text_info, True, (255, 255, 255))
-			self.screen.blit(canvas, (0, 0))
-			self.screen.blit(text, (0, 0))
-			pg.display.flip()
+		# Add the info text to the canvas, blit the canvas to the screen, update Pygame display
+		text_info = str(data.settings.width) + " x " + str(data.settings.height) + " (" + str(data.settings.width * data.settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(data.settings.fps) + " FPS"
+		text = self.font.render(text_info, True, (255, 255, 255))
+		self.screen.blit(canvas, (0, 0))
+		self.screen.blit(text, (0, 0))
+		pg.display.flip()
 
 	# Handle keyboard and mouse input, apply object movement and rotation for the main object
-	def input(self, obj_main: data.Object, time: float):
+	def input(self, time: float):
 		mods = pg.key.get_mods()
 		mouse_rot = vec2(0, 0)
 
@@ -280,7 +265,7 @@ class Window:
 				case pg.MOUSEMOTION:
 					if self.mouselook:
 						x, y = pg.mouse.get_pos()
-						center = self.box_win / 2
+						center = vec2(data.settings.window_scaled[0] / 2, data.settings.window_scaled[1] / 2)
 						mouse_rot.x += center.x - x
 						mouse_rot.y += center.y - y
 						pg.mouse.set_pos((center.x, center.y))
@@ -367,7 +352,7 @@ class Window:
 				if data.settings.max_pitch:
 					dir_right *= vec3(1, 0, 1)
 					dir_right = dir_right.normalize()
-				obj_main.accelerate(dir_right * max(-1, min(+1, self.input_vel.x)) * unit)
+				data.player.accelerate(dir_right * max(-1, min(+1, self.input_vel.x)) * unit)
 
 			if self.input_vel.y:
 				unit = data.settings.speed_jump / (1 + time)
@@ -375,7 +360,7 @@ class Window:
 				if data.settings.max_pitch:
 					dir_up *= vec3(0, 1, 0)
 					dir_up = dir_up.normalize()
-				obj_main.accelerate(dir_up * max(-1, min(+1, self.input_vel.y)) * unit)
+				data.player.accelerate(dir_up * max(-1, min(+1, self.input_vel.y)) * unit)
 
 			if self.input_vel.z:
 				unit = data.settings.speed_move * speed * time
@@ -383,26 +368,26 @@ class Window:
 				if data.settings.max_pitch:
 					dir_forward *= vec3(1, 0, 1)
 					dir_forward = dir_forward.normalize()
-				obj_main.accelerate(dir_forward * max(-1, min(+1, self.input_vel.z)) * unit)
+				data.player.accelerate(dir_forward * max(-1, min(+1, self.input_vel.z)) * unit)
 
 		# Apply rotation if any direction is desired, limit the roll and pitch of the camera to safe settings
 		if self.input_rot != 0 or mouse_rot != 0:
 			unit_key = data.settings.speed_move * time
 			unit_mouse = data.settings.speed_mouse / (1 + time * 1000)
 			rot = self.input_rot * unit_key + vec3(0, +mouse_rot.x, -mouse_rot.y) * unit_mouse
-			obj_main.rotate(rot)
+			data.player.rotate(rot)
 
 			if data.settings.max_roll:
 				roll_min = max(180, 360 - data.settings.max_roll)
 				roll_max = min(180, data.settings.max_roll)
-				obj_main.rot.x = roll_max if obj_main.rot.x > roll_max and obj_main.rot.x <= 180 else obj_main.rot.x
-				obj_main.rot.x = roll_min if obj_main.rot.x < roll_min and obj_main.rot.x > 180 else obj_main.rot.x
+				data.player.rot.x = roll_max if data.player.rot.x > roll_max and data.player.rot.x <= 180 else data.player.rot.x
+				data.player.rot.x = roll_min if data.player.rot.x < roll_min and data.player.rot.x > 180 else data.player.rot.x
 
 			if data.settings.max_pitch:
 				pitch_min = max(180, 360 - data.settings.max_pitch)
 				pitch_max = min(180, data.settings.max_pitch)
-				obj_main.rot.z = pitch_max if obj_main.rot.z > pitch_max and obj_main.rot.z <= 180 else obj_main.rot.z
-				obj_main.rot.z = pitch_min if obj_main.rot.z < pitch_min and obj_main.rot.z > 180 else obj_main.rot.z
+				data.player.rot.z = pitch_max if data.player.rot.z > pitch_max and data.player.rot.z <= 180 else data.player.rot.z
+				data.player.rot.z = pitch_min if data.player.rot.z < pitch_min and data.player.rot.z > 180 else data.player.rot.z
 
 	# Get the LOD level of a chunk based on its distance to the camera position
 	def chunk_lod(self, pos: vec3):
@@ -466,27 +451,22 @@ class Window:
 
 	# Main loop of the Pygame window, apply input then execute the update functions of objects in the scene and request redrawing when the window is focused
 	def update(self):
-		obj_main = None
-		for obj_main in data.objects:
-			if obj_main.cam_vec:
-				break
-		if not obj_main or not obj_main.cam_vec:
+		if not data.player or not data.player.cam_vec:
 			print("Error: No camera object found, define at least one object with a camera in the scene.")
 			self.running = False
 			return
 
 		time = self.clock.get_time() / 1000
-		self.input(obj_main, time)
-		for obj in data.objects:
-			obj.update(self.cam.pos)
-
 		if pg.mouse.get_focused():
 			self.iris = mix(self.iris, self.iris_target * data.settings.iris, data.settings.iris_time * time)
-			self.cam.pos = obj_main.cam_pos
-			self.cam.rot = obj_main.cam_rot
-			self.chunk_update(time)
+			self.cam.pos = data.player.cam_pos
+			self.cam.rot = data.player.cam_rot
 			self.draw()
+			self.chunk_update(time)
 			pg.mouse.set_visible(not self.mouselook)
+		for obj in data.objects:
+			obj.update(self.cam.pos)
+		self.input(time)
 
 # Create the main window and start Pygame
 Window()

@@ -135,4 +135,5 @@ spr_box.anim_set(0, 1, 1)
 obj_box = data.Object(pos = vec3(-8, -8, -8), rot = vec3(0, 0, 0), vel = vec3(0, 0, 0), physics = True)
 obj_box.set_sprite(spr_box)
 
+data.player = obj_player
 data.background = material_background
