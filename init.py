@@ -80,7 +80,7 @@ class Camera:
 					# Normalize ray velocity after any changes to ensure the speed of light remains 1 and voxels aren't skipped or calculated twice
 					bounce = mat.function(ray, mat, data.settings)
 					ray.bounces += bounce
-					ray.life /= 1 + bounce * data.settings.lod_bounces
+					ray.life /= chunk.resolution + bounce * data.settings.lod_bounces
 					ray.vel = ray.vel.normalize()
 					if ray.step >= ray.life or ray.energy >= data.settings.max_light or ray.bounces >= data.settings.max_bounces + 1:
 						break
@@ -111,7 +111,7 @@ class Camera:
 							ray.vel.z -= ray.vel.z * mat.ior * 2
 
 			# Advance the ray, move by frame LOD if inside a valid chunk or skip toward the safest possible distance to the nearest chunk if void
-			step = chunk.lod if chunk else 1 + abs(data.settings.chunk_radius - (ray.pos.mins() + data.settings.chunk_radius) % data.settings.chunk_size)
+			step = chunk.resolution if chunk else 1 + abs(data.settings.chunk_radius - (ray.pos.mins() + data.settings.chunk_radius) % data.settings.chunk_size)
 			ray.step += step
 			ray.pos += ray.vel * step
 
@@ -237,15 +237,20 @@ class Window:
 				canvas_blur = pg.transform.smoothscale(canvas_blur, data.settings.window)
 				canvas.blit(canvas_blur, (0, 0), special_flags = pg.BLEND_RGBA_ADD)
 
-			# Filter: Scale the canvas to the window resolution, smooth and sharp passes are alternated to achieve the selected pixel filter
-			# 0 = Fully sharp, 1 = Fully smooth, < 1 = Emulate subsampling, > 1 = Emulate supersampling
-			if data.settings.scale > 1:
-				func_scale_by = pg.transform.scale_by if data.settings.smooth > 1 else pg.transform.smoothscale_by
-				func_scale = pg.transform.scale if data.settings.smooth < 1 else pg.transform.smoothscale
-				if data.settings.smooth and data.settings.smooth != 1:
-					fac = 1 / (1 - data.settings.smooth) if data.settings.smooth < 1 else data.settings.smooth
-					canvas = func_scale_by(canvas, (fac, fac))
-				canvas = func_scale(canvas, data.settings.window_scaled)
+			# Subsampling: Smoothly scale the canvas by the subsample amount to create extra pixels
+			if data.settings.subsamples:
+				fac = 1 + data.settings.subsamples
+				canvas = pg.transform.smoothscale_by(canvas, (fac, fac))
+
+			# Filter: Scale the canvas to the window size using the desired type of pixel smoothness, for gradual pixel hardness the canvas is first scaled sharply and then smoothly
+			if data.settings.smooth == 0:
+				canvas = pg.transform.scale(canvas, data.settings.window_scaled)
+			elif data.settings.smooth == 1:
+				canvas = pg.transform.smoothscale(canvas, data.settings.window_scaled)
+			else:
+				fac = math.trunc(1 / data.settings.smooth)
+				canvas = pg.transform.scale_by(canvas, (fac, fac))
+				canvas = pg.transform.smoothscale(canvas, data.settings.window_scaled)
 
 			# Add the info text to the canvas, blit the canvas to the screen, update Pygame display
 			text_info = str(data.settings.width) + " x " + str(data.settings.height) + " (" + str(data.settings.width * data.settings.height) + "px) - " + str(math.trunc(self.clock.get_fps())) + " / " + str(data.settings.fps) + " FPS"
@@ -348,29 +353,18 @@ class Window:
 		# Apply movement if any direction is desired
 		if self.input_vel != 0:
 			speed = 2 if mods & pg.KMOD_SHIFT else 1
-
+			rot = vec3(0, data.player.rot.y, 0).quaternion() if data.settings.max_pitch else data.player.rot.quaternion()
 			if self.input_vel.x:
 				unit = data.settings.speed_move * speed * time
-				dir_right = self.cam.rot.vec_right()
-				if data.settings.max_pitch:
-					dir_right *= vec3(1, 0, 1)
-					dir_right = dir_right.normalize()
+				dir_right = rot.vec_right()
 				data.player.accelerate(dir_right * max(-1, min(+1, self.input_vel.x)) * unit)
-
 			if self.input_vel.y:
 				unit = data.settings.speed_jump / (1 + time)
-				dir_up = self.cam.rot.vec_up()
-				if data.settings.max_pitch:
-					dir_up *= vec3(0, 1, 0)
-					dir_up = dir_up.normalize()
+				dir_up = rot.vec_up()
 				data.player.accelerate(dir_up * max(-1, min(+1, self.input_vel.y)) * unit)
-
 			if self.input_vel.z:
 				unit = data.settings.speed_move * speed * time
-				dir_forward = self.cam.rot.vec_forward()
-				if data.settings.max_pitch:
-					dir_forward *= vec3(1, 0, 1)
-					dir_forward = dir_forward.normalize()
+				dir_forward = rot.vec_forward()
 				data.player.accelerate(dir_forward * max(-1, min(+1, self.input_vel.z)) * unit)
 
 		# Apply rotation if any direction is desired, limit the roll and pitch of the camera to safe settings
@@ -379,13 +373,11 @@ class Window:
 			unit_mouse = data.settings.speed_mouse / (1 + time * 1000)
 			rot = self.input_rot * unit_key + vec3(0, +mouse_rot.x, -mouse_rot.y) * unit_mouse
 			data.player.rotate(rot)
-
 			if data.settings.max_roll:
 				roll_min = max(180, 360 - data.settings.max_roll)
 				roll_max = min(180, data.settings.max_roll)
 				data.player.rot.x = roll_max if data.player.rot.x > roll_max and data.player.rot.x <= 180 else data.player.rot.x
 				data.player.rot.x = roll_min if data.player.rot.x < roll_min and data.player.rot.x > 180 else data.player.rot.x
-
 			if data.settings.max_pitch:
 				pitch_min = max(180, 360 - data.settings.max_pitch)
 				pitch_max = min(180, data.settings.max_pitch)
@@ -433,7 +425,7 @@ class Window:
 								if voxels:
 									if not obj_id in self.chunks_objects:
 										self.chunks_objects[obj_id] = {}
-									self.chunks_objects[obj_id][post_chunk] = data.Frame(packed = True, lod = 1)
+									self.chunks_objects[obj_id][post_chunk] = data.Frame(packed = True, resolution = 1)
 									self.chunks_objects[obj_id][post_chunk].set_voxels(voxels, True)
 
 			# Empty chunks were marked for recalculation, remove and create new frames from the combined voxels lists of all chunk if any voxel data is available
@@ -446,15 +438,15 @@ class Window:
 						if post_chunk in obj:
 							voxels |= obj[post_chunk].get_voxels()
 					if voxels:
-						self.chunks[post_chunk] = [None] * data.settings.chunk_lod
-						for lod in range(data.settings.chunk_lod):
-							self.chunks[post_chunk][lod] = data.Frame(packed = True, lod = lod + 1)
+						self.chunks[post_chunk] = [None] * (data.settings.chunk_lod + 1)
+						for lod in range(data.settings.chunk_lod + 1):
+							self.chunks[post_chunk][lod] = data.Frame(packed = True, resolution = lod + 1)
 							self.chunks[post_chunk][lod].set_voxels(voxels, True)
 					else:
 						del self.chunks[post_chunk]
 				if post_chunk in self.chunks and (not data.settings.culling or post_chunk in traversed):
 					pos = vec3(post_chunk[0], post_chunk[1], post_chunk[2]) + data.settings.chunk_radius
-					lod = min(math.trunc(pos.distance(self.cam.pos) / (data.settings.dist_max / data.settings.chunk_lod)), data.settings.chunk_lod - 1)
+					lod = min(math.trunc(pos.distance(self.cam.pos) / (data.settings.dist_max / (1 + data.settings.chunk_lod))), data.settings.chunk_lod)
 					self.cam.chunk_set(post_chunk, self.chunks[post_chunk][lod])
 				else:
 					self.cam.chunk_set(post_chunk, None)

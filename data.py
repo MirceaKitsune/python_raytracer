@@ -4,6 +4,7 @@ import multiprocessing as mp
 
 import configparser
 import importlib
+import gzip
 import copy
 import math
 import random
@@ -18,6 +19,7 @@ settings = store(
 	width = cfg.getint("WINDOW", "width") or 64,
 	height = cfg.getint("WINDOW", "height") or 64,
 	scale = cfg.getint("WINDOW", "scale") or 1,
+	subsamples = cfg.getfloat("WINDOW", "subsamples") or 0,
 	smooth = cfg.getfloat("WINDOW", "smooth") or 0,
 	fps = cfg.getint("WINDOW", "fps") or 0,
 
@@ -35,7 +37,7 @@ settings = store(
 	falloff = cfg.getfloat("RENDER", "falloff") or 0,
 	chunk_rate = cfg.getint("RENDER", "chunk_rate") or 0,
 	chunk_size = cfg.getint("RENDER", "chunk_size") or 16,
-	chunk_lod = cfg.getint("RENDER", "chunk_lod") or 1,
+	chunk_lod = cfg.getint("RENDER", "chunk_lod") or 0,
 	dof = cfg.getfloat("RENDER", "dof") or 0,
 	dist_min = cfg.getint("RENDER", "dist_min") or 0,
 	dist_max = cfg.getint("RENDER", "dist_max") or 32,
@@ -55,8 +57,8 @@ settings = store(
 	speed_mouse = cfg.getfloat("PHYSICS", "speed_mouse") or 1,
 	min_velocity = cfg.getfloat("PHYSICS", "min_velocity") or 0,
 	max_velocity = cfg.getfloat("PHYSICS", "max_velocity") or 0,
-	max_pitch = cfg.getfloat("PHYSICS", "max_pitch") or 0,
-	max_roll = cfg.getfloat("PHYSICS", "max_roll") or 0,
+	max_pitch = cfg.getint("PHYSICS", "max_pitch") or 0,
+	max_roll = cfg.getint("PHYSICS", "max_roll") or 0,
 	dist_move = cfg.getint("PHYSICS", "dist_move") or 0,
 )
 settings.window = settings.width, settings.height
@@ -94,9 +96,9 @@ class Material:
 class Frame:
 	def __init__(self, **settings):
 		# If voxel compression is enabled, describe full areas as their min / max corners instead of storing every voxel individually
-		# If LOD is higher than 1, positions will be interpreted in lower steps so less data is used to represent a greater area
+		# If resolution is higher than 1, positions will be interpreted in lower steps so less data is used to represent a greater area
 		self.packed = settings["packed"] if "packed" in settings else False
-		self.lod = settings["lod"] if "lod" in settings else 1
+		self.resolution = settings["resolution"] if "resolution" in settings else 1
 
 		# data3 stores a single material at a precise position and is indexed by (x, y, z)
 		# data6 stores a cubic area filled with a material and is indexed by (x_min, y_min, z_min, x_max, y_max, z_max)
@@ -117,22 +119,22 @@ class Frame:
 	def get_voxels(self):
 		voxels = {}
 		for post3, mat in self.data3.items():
-			for x in range(post3[0] * self.lod, post3[0] * self.lod + self.lod):
-				for y in range(post3[1] * self.lod, post3[1] * self.lod + self.lod):
-					for z in range(post3[2] * self.lod, post3[2] * self.lod + self.lod):
+			for x in range(post3[0] * self.resolution, post3[0] * self.resolution + self.resolution):
+				for y in range(post3[1] * self.resolution, post3[1] * self.resolution + self.resolution):
+					for z in range(post3[2] * self.resolution, post3[2] * self.resolution + self.resolution):
 						post = x, y, z
 						voxels[post] = mat
 		for post6, mat in self.data6.items():
-			for x in range(post6[0] * self.lod, post6[3] * self.lod + self.lod):
-				for y in range(post6[1] * self.lod, post6[4] * self.lod + self.lod):
-					for z in range(post6[2] * self.lod, post6[5] * self.lod + self.lod):
+			for x in range(post6[0] * self.resolution, post6[3] * self.resolution + self.resolution):
+				for y in range(post6[1] * self.resolution, post6[4] * self.resolution + self.resolution):
+					for z in range(post6[2] * self.resolution, post6[5] * self.resolution + self.resolution):
 						post = x, y, z
 						voxels[post] = mat
 		return voxels
 
 	# Get the voxel at this position from the frame, attempt to fetch by index from data3 followed by scanning data6 if not found
 	def get_voxel(self, pos: vec3):
-		pos = pos // self.lod if self.lod > 1 else pos
+		pos = pos // self.resolution if self.resolution > 1 else pos
 		post3 = pos.tuple()
 		if post3 in self.data3:
 			return self.data3[post3]
@@ -145,8 +147,8 @@ class Frame:
 	# Set a voxel at this position on the frame
 	# Unpack the affected area since its content will be changed, ignore positions that aren't valid at the frame's LOD
 	def set_voxel(self, pos: vec3, mat: Material, force: bool):
-		if self.lod <= 1 or (not pos.x % self.lod and not pos.y % self.lod and not pos.z % self.lod):
-			pos = pos // self.lod if self.lod > 1 else pos
+		if self.resolution <= 1 or (not pos.x % self.resolution and not pos.y % self.resolution and not pos.z % self.resolution):
+			pos = pos // self.resolution if self.resolution > 1 else pos
 			if force or not self.get_voxel(pos):
 				post3 = pos.tuple()
 				self.unpack(pos)
@@ -160,10 +162,10 @@ class Frame:
 	# Unpack the affected area since its content will be changed, ignore positions that aren't valid at the frame's LOD
 	def set_voxels(self, voxels: dict, force: bool):
 		for post, mat in voxels.items():
-			if self.lod <= 1 or (not post[0] % self.lod and not post[1] % self.lod and not post[2] % self.lod):
+			if self.resolution <= 1 or (not post[0] % self.resolution and not post[1] % self.resolution and not post[2] % self.resolution):
 				pos = vec3(post[0], post[1], post[2])
 				if force or not self.get_voxel(pos):
-					pos = pos // self.lod if self.lod > 1 else pos
+					pos = pos // self.resolution if self.resolution > 1 else pos
 					post3 = pos.tuple()
 					self.unpack(pos)
 					if mat:
@@ -252,7 +254,7 @@ class Sprite:
 	def __init__(self, **settings):
 		# Sprite size needs to be an even number as to not break object calculations, voxels are located at integer positions and checking voxel position from object center would result in 0.5
 		self.size = settings["size"] if "size" in settings else vec3(0, 0, 0)
-		self.lod = settings["lod"] if "lod" in settings else 1
+		self.lod = settings["lod"] if "lod" in settings else 0
 		if self.size.x % 2 or self.size.y % 2 or self.size.z % 2:
 			print("Warning: Sprite size " + str(self.size) + " contains a float or odd number in one or more directions, affected axes will be rounded and enlarged by one unit.")
 			self.size.x = math.trunc(self.size.x) + 1 if math.trunc(self.size.x) % 2 != 0 else math.trunc(self.size.x)
@@ -263,19 +265,27 @@ class Sprite:
 		self.frame = self.frame_time = self.frame_start = self.frame_end = 0
 		self.frames = []
 		for i in range(settings["frames"]):
-			self.frames.append(Frame(packed = False, lod = self.lod))
+			self.frames.append(Frame(packed = False, resolution = self.lod + 1))
 
 	# Import from text file, Y and Z are flipped to match the engine's coordinate system
-	def from_text(self, files: list, materials: dict):
+	def load(self, files: list, materials: dict):
 		for frame in range(min(len(files), len(self.frames))):
-			text = open(files[frame], "r")
+			data = None
+			match files[frame].split(".")[-1]:
+				case "txt":
+					data = open(files[frame], "rt")
+				case "gz":
+					data = gzip.open(files[frame], "rt")
+			if not data:
+				print("Warning: Cannot open sprite " + file + ", make sure the path and extension are correct.")
+				return
+
 			voxels = {}
-			for line in text:
+			for line in data.readlines():
 				params = line.strip().split(" ")
 				if params[0].isdigit() and params[1].isdigit() and params[2].isdigit() and params[3] in materials:
 					post = self.size.x - int(params[0]), int(params[2]), int(params[1])
-					mat = materials[params[3]]
-					voxels[post] = mat
+					voxels[post] = materials[params[3]]
 			self.get_frame(frame).set_voxels(voxels, True)
 
 	# Create a copy of this sprite that can be edited independently
@@ -472,8 +482,8 @@ class Object:
 	def move(self, pos):
 		if pos != self.pos:
 			self.pos = pos
-			self.mins = math.trunc(self.pos) - self.size
-			self.maxs = math.trunc(self.pos) + self.size
+			self.mins = math.ceil(self.pos) - self.size
+			self.maxs = math.floor(self.pos) + self.size
 			self.redraw = True
 			self.set_camera_pos()
 
@@ -483,65 +493,64 @@ class Object:
 
 	# Physics engine, applies velocity accounting for collisions with other objects and moves this object to the nearest empty space if one is available
 	def update_physics(self):
-		friction = elasticity = 0
+		# Each iteration a move is preformed in the direction of the largest velocity step, the check continues until all velocity steps have been processed
 		self_spr = self.get_sprite()
-		vel_steps = self.vel
-		while(vel_steps != 0):
-			# Directions and their corresponding slice boundaries that will be checked, in order -X, +X, -Y, +Y, -Z, +Z
-			pos_dirs = {
-				(-1, 0, 0): (self.mins.x - 1, self.mins.y + 0, self.mins.z + 0, self.mins.x + 0, self.maxs.y + 0, self.maxs.z + 0),
-				(+1, 0, 0): (self.maxs.x + 0, self.mins.y + 0, self.mins.z + 0, self.maxs.x + 1, self.maxs.y + 0, self.maxs.z + 0),
-				(0, -1, 0): (self.mins.x + 0, self.mins.y - 1, self.mins.z + 0, self.maxs.x + 0, self.mins.y + 0, self.maxs.z + 0),
-				(0, +1, 0): (self.mins.x + 0, self.maxs.y + 0, self.mins.z + 0, self.maxs.x + 0, self.maxs.y + 1, self.maxs.z + 0),
-				(0, 0, -1): (self.mins.x + 0, self.mins.y + 0, self.mins.z - 1, self.maxs.x + 0, self.maxs.y + 0, self.mins.z + 0),
-				(0, 0, +1): (self.mins.x + 0, self.mins.y + 0, self.maxs.z + 0, self.maxs.x + 0, self.maxs.y + 0, self.maxs.z + 1),
-			}
+		friction = elasticity = 0
+		vel_apply = self.vel
+		while vel_apply != 0:
+			vel_dir = math.trunc(vel_apply.normalize())
+			blocked = False
+			post6 = None
 
-			# Check collisions in the direction of velocity, unnecessary directions are discarded before scanning other objects
-			for post3_dir, post6 in dict(pos_dirs).items():
-				pos_dir = vec3(post3_dir[0], post3_dir[1], post3_dir[2])
-				if not pos_dir.x * self.vel.x > 0 and not pos_dir.y * self.vel.y > 0 and not pos_dir.z * self.vel.z > 0:
-					del pos_dirs[post3_dir]
-				else:
-					for obj in objects.values():
-						if obj != self and obj.visible and obj.intersects(vec3(post6[0], post6[1], post6[2]), vec3(post6[3], post6[4], post6[5])):
-							# If we're colliding with another physical object, transfer velocity based on weight difference and projectile speed
-							if obj.physics:
-								vel = self.vel * max(0, min(1, abs(self.vel).maxs() * self.weight - obj.weight))
-								self.vel -= vel
-								obj.vel += vel
+			# Determine the start and end corners of the slice that will be checked for collisions in order -X, +X, -Y, +Y, -Z, +Z
+			if vel_dir.x < 0:
+				post6 = self.mins.x - 1, self.mins.y + 0, self.mins.z + 0, self.mins.x + 0, self.maxs.y + 0, self.maxs.z + 0
+			elif vel_dir.x > 0:
+				post6 = self.maxs.x + 0, self.mins.y + 0, self.mins.z + 0, self.maxs.x + 1, self.maxs.y + 0, self.maxs.z + 0
+			elif vel_dir.y < 0:
+				post6 = self.mins.x + 0, self.mins.y - 1, self.mins.z + 0, self.maxs.x + 0, self.mins.y + 0, self.maxs.z + 0
+			elif vel_dir.y > 0:
+				post6 = self.mins.x + 0, self.maxs.y + 0, self.mins.z + 0, self.maxs.x + 0, self.maxs.y + 1, self.maxs.z + 0
+			elif vel_dir.z < 0:
+				post6 = self.mins.x + 0, self.mins.y + 0, self.mins.z - 1, self.maxs.x + 0, self.maxs.y + 0, self.mins.z + 0
+			elif vel_dir.z > 0:
+				post6 = self.mins.x + 0, self.mins.y + 0, self.maxs.z + 0, self.maxs.x + 0, self.maxs.y + 0, self.maxs.z + 1
 
-							# If a direction collides with any solid voxels, it's removed from the list to mark it as invalid for movement
-							# This check is also used to apply friction and elasticity from all neighboring voxels the object is touching
-							obj_spr = obj.get_sprite()
-							for x in range(post6[0], post6[3] + 1):
-								for y in range(post6[1], post6[4] + 1):
-									for z in range(post6[2], post6[5] + 1):
-										pos = vec3(x, y, z)
-										obj_mat = obj_spr.get_voxel(None, pos - obj.mins, obj.rot)
-										if obj_mat and obj_mat.solidity > random.random():
-											self_mat = self_spr.get_voxel(None, pos - self.mins - pos_dir, self.rot)
-											if self_mat and self_mat.solidity > random.random():
-												friction += obj_mat.friction * self_mat.friction * settings.friction
-												elasticity += obj_mat.elasticity * self_mat.elasticity * settings.friction
-												if post3_dir in pos_dirs:
-													del pos_dirs[post3_dir]
+			# Check all objects that intersect the slice in which self desires to move
+			for obj in objects.values():
+				if obj != self and obj.visible and obj.intersects(vec3(post6[0], post6[1], post6[2]), vec3(post6[3], post6[4], post6[5])):
+					# If we're colliding with another physical object, transfer velocity based on weight difference and projectile speed
+					if obj.physics:
+						vel_transfer = vel_apply * max(0, min(1, abs(vel_apply).maxs() * self.weight - obj.weight))
+						obj.vel += vel_transfer
+						self.vel -= vel_transfer
+						vel_apply -= vel_transfer
 
-			# Preform a move in at most one unit, extract the amount of movement for this call from the total number of steps
-			# If velocity is greater than 1 the main loop will continue until the total velocity has been applied
-			# Note: Diagonal movement may intersect corners as direction checks only account for one axis
-			vel_step = vel_steps.max(-1).min(+1)
-			vel_steps -= vel_step
-			vel_dirs = vec3(0, 0, 0)
-			for post in pos_dirs:
-				vel_dirs += vec3(post[0], post[1], post[2])
-			self.move(self.pos + vel_step * abs(vel_dirs))
+					# If the slice collides with any solid voxel in the object the move will no longer be preformed this call
+					# The check is also used to update friction and elasticity from voxels that were touched
+					obj_spr = obj.get_sprite()
+					for x in range(post6[0], post6[3] + 1):
+						for y in range(post6[1], post6[4] + 1):
+							for z in range(post6[2], post6[5] + 1):
+								pos = vec3(x, y, z)
+								obj_mat = obj_spr.get_voxel(None, pos - obj.mins, obj.rot)
+								if obj_mat and obj_mat.solidity > random.random():
+									self_mat = self_spr.get_voxel(None, pos - self.mins - vel_dir, self.rot)
+									if self_mat and self_mat.solidity > random.random():
+										friction += obj_mat.friction * self_mat.friction * settings.friction
+										elasticity += obj_mat.elasticity * self_mat.elasticity * settings.friction
+										blocked = True
+
+			# If the direction is valid move by at most one unit per step and decrease the amount from the velocity, if not clear all velocity in this direction since it will never collide during this check
+			vel_step = vel_dir * abs(vel_apply) if blocked else vel_dir * abs(vel_apply).min(1)
+			vel_apply -= vel_step
+			if not blocked:
+				self.move(self.pos + vel_step)
 
 		# Apply global effects to velocity then bound it to the terminal velocity
 		self.vel -= vec3(0, self.weight * settings.gravity, 0)
 		self.vel -= self.vel * elasticity
-		self.vel /= 1 + friction
-		self.vel *= 1 - settings.friction_air
+		self.vel /= 1 + max(0, friction + settings.friction_air)
 		self.vel = self.vel.min(+settings.max_velocity).max(-settings.max_velocity)
 		if abs(self.vel.x) < settings.min_velocity:
 			self.vel.x = 0
@@ -584,8 +593,8 @@ class Object:
 		if sprite:
 			self.sprite = sprite
 			self.size = math.trunc(self.sprite.size / 2)
-			self.mins = math.trunc(self.pos) - self.size
-			self.maxs = math.trunc(self.pos) + self.size
+			self.mins = math.ceil(self.pos) - self.size
+			self.maxs = math.floor(self.pos) + self.size
 		self.redraw = True
 		self.set_weight()
 
@@ -605,7 +614,7 @@ class Object:
 	def set_camera_pos(self):
 		if self.cam_vec != 0:
 			self.cam_rot = self.rot.quaternion()
-			d = self.cam_rot.vec_forward()
+			d = vec3(0, self.rot.y, 0).quaternion().vec_forward()
 			self.cam_pos = self.pos + vec3(self.cam_vec.x * d.x, self.cam_vec.y, self.cam_vec.x * d.z)
 
 	# Mark that we want to attach the camera to this object at the provided position offset
