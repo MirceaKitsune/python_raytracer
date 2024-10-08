@@ -131,16 +131,18 @@ class Camera:
 			dir_x = -1 + (x / data.settings.width) * 2
 			dir_y = -1 + (y / data.settings.height) * 2
 			detail = 1 - abs(dir_x * dir_y) * data.settings.lod_edge
-			samples = max(1, round(data.settings.samples * detail))
-			for sample in range(samples):
+			samples_min = max(1, data.settings.samples_min)
+			samples_max = max(1, round(data.settings.samples_max * detail))
+			for sample in range(samples_max):
 				if data.settings.static:
 					random.seed((1 + x) * (1 + y) * (1 + sample))
-
 				ray_detail = detail / (1 + sample * data.settings.lod_samples) * (1 - data.settings.lod_random * random.random())
 				ray = self.trace(dir_x, dir_y, ray_detail)
 				alpha = round(min(1, ray.energy + data.settings.shutter) * 255)
 				colors.append(ray.color.array() + [alpha])
 				traversed = merge(traversed, ray.traversed)
+				if sample + 1 >= samples_min and sample >= (ray.bounces / (data.settings.max_bounces + 1)) * samples_max:
+					break
 
 			color = average(colors)
 			surface.set_at((x, y), (color[0], color[1], color[2], color[3]))
